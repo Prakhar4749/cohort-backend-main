@@ -2,10 +2,10 @@
   "name": "cohorts-backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "./src/index.js",
   "type": "module",
   "scripts": {
-    "start": "nodemon src/index.js",
+    "start": "nodemon app",
     "dev": " nodemon --exec \"node src/index.js\"",
     "lint": "eslint . ",
     "lint:fix": "eslint . --fix",
