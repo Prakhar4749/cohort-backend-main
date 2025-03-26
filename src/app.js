@@ -31,6 +31,7 @@ app.use(
         // Add your Vercel frontend deployment URL
         "https://cohort-backend-main-kxzy2tv0c-prakhar-sakhares-projects.vercel.app",  // Matches any Vercel app subdomain
       ];
+      
 
       if (!origin || allowedOrigins.some(allowed => 
         allowed instanceof RegExp 
