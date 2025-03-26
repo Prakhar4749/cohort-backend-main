@@ -26,11 +26,17 @@ app.use(
     origin: (origin, callback) => {
       const allowedOrigins = [
         "http://localhost:3000",
-        "http://localhost:5173", // Add Vite's default port if you're using Vite
+        "http://localhost:5173", // Vite's default port
         appEnvConfigs.REACT_FRONTEND_APP_URL,
+        // Add your Vercel frontend deployment URL
+        "https://cohort-backend-main-kxzy2tv0c-prakhar-sakhares-projects.vercel.app",  // Matches any Vercel app subdomain
       ];
 
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.some(allowed => 
+        allowed instanceof RegExp 
+          ? allowed.test(origin) 
+          : allowed === origin
+      )) {
         callback(null, true);
       } else {
         console.log("Blocked by CORS. Origin:", origin);
@@ -45,7 +51,6 @@ app.use(
     optionsSuccessStatus: 204,
   })
 );
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("common"));
