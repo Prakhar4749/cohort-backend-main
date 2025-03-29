@@ -25,6 +25,8 @@ app.use(
   cors({
     origin: (origin, callback) => {
       const allowedOrigins = [
+        "https://cohorts.com",
+        "http://localhost:4200",
         "http://localhost:3000",
         "http://localhost:5173", // Vite's default port
         appEnvConfigs.REACT_FRONTEND_APP_URL,
