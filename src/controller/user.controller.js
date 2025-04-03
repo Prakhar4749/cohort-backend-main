@@ -13,7 +13,21 @@ import { createDefaultSettings } from '../services/settings.service.js';
 
 // Signup Controller with AsyncHandler
 export const signup = AsyncHandler(async (req, res) => {
-  const { username, email, password } = req.body;
+  const { 
+    username, 
+    email, 
+    password,
+    firstName,
+    lastName,
+    livelink,
+    state,
+    bio,
+    profilePhoto,
+    coverPhoto,
+    preferences, 
+    verifiedNumber,
+    socialAccounts
+  } = req.body;
 
   // Check for existing user (email or username) - do both checks at once
   const existingUser = await User.findOne({
@@ -32,17 +46,29 @@ export const signup = AsyncHandler(async (req, res) => {
   // Hash password
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  // Create user with default values
+  // Create user with all provided fields
   const newUser = await User.create({
     username, 
     email, 
-    password: hashedPassword
+    password: hashedPassword,
+    // Add optional fields if they exist in the request
+    ...(firstName && { firstName }),
+    ...(lastName && { lastName }),
+    ...(livelink && { livelink }),
+    ...(state && { state }),
+    ...(bio && { bio }),
+    ...(profilePhoto && { profilePhoto }),
+    ...(coverPhoto && { coverPhoto }),
+    ...(preferences && { preferences }),
+    ...(verifiedNumber && { verifiedNumber }),
+    ...(socialAccounts && { socialAccounts })
+    // Note: contribution, settings, followers, followings are handled differently
+    // as they have default values or are created separately
   });
 
   // Create related documents
   await createDefaultSettings(newUser._id);
   
-
   // Generate JWT token
   const token = jwt.sign(
     { id: newUser._id }, 

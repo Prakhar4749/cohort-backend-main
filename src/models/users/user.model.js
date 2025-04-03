@@ -4,11 +4,13 @@ const userSchema = new mongoose.Schema(
   {
     firstName: {
       type: String,
-      trim: true
+      trim: true,
+      default: ""
     },
     lastName: {
       type: String,
-      trim: true
+      trim: true,
+      default: ""
     },
     username: {
       type: String,
@@ -29,25 +31,36 @@ const userSchema = new mongoose.Schema(
       minlength: [8, 'Password must be at least 8 characters long']
     },
     livelink:{
-      type: String
+      type: String,
+      default: ""
     },
     state: {
       type: String,
-      trim: true
+      trim: true,
+      default: ""
     },
     bio: {
       type: String,
-      trim: true
+      trim: true,
+      default: ""
     },
-    profilePhoto: String,
-    coverPhoto: String,
-    prferences: {
+    profilePhoto: {
+      type: String,
+      default: ""
+    },
+    coverPhoto: {
+      type: String,
+      default: ""
+    },
+    preferences: {
       type: String,
       trim: true,
-      lowercase: true
+      lowercase: true,
+      default: ""
     },
     verifiedNumber: {
-      type: Number
+      type: Number,
+      default: 0
     },
     contribution: {
       posts: {
@@ -76,9 +89,18 @@ const userSchema = new mongoose.Schema(
     },
 
     socialAccounts: {
-      instagram: String,
-      facebook: String,
-      x: String,
+      instagram: {
+        type: String,
+        default: ""
+      },
+      facebook: {
+        type: String,
+        default: ""
+      },
+      x: {
+        type: String,
+        default: ""
+      },
     },
     recentActivity:[
       { type: mongoose.Schema.Types.ObjectId, ref: "post" }
@@ -99,9 +121,7 @@ const userSchema = new mongoose.Schema(
       ref: "UserFollowing"
     },
 
-
     createdAt: { type: Date, default: Date.now },
-
   },
   { timestamps: true }
 );
