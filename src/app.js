@@ -7,8 +7,10 @@ import authRoutes from "./routes/authRoutes.js";
 import CommunityRouter from "./routes/community.routes.js";
 import CourseRouter from "./routes/course.routes.js";
 import settingsRoutes from "./routes/user.routes.js";
+import supportRoutes from "./routes/support.routes.js"
 import { appEnvConfigs } from "./configs/env_config.js";
 import PostRouter from "./routes/post.routes.js";
+import { seedFAQs } from "./utils/dbSeeder.js";
 
 // CONFIGS
 export const app = express();
@@ -64,12 +66,14 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("common"));
 
+
 // ROUTES
 app.use("/api/v1", authRoutes);
 app.use("/api/v1", PostRouter);
 app.use("/api/v1", CommunityRouter);
 app.use("/api/v1", CourseRouter);
 app.use("/api/v1", settingsRoutes);
+app.use("/api/v1", supportRoutes);
 
 // GLOBAL ERROR HANDLER
 app.use((err, _req, res, next) => {
