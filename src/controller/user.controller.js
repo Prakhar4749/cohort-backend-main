@@ -212,3 +212,40 @@ export const oauthLogin = async (req, res) => {
       .json({ message: "OAuth Authentication Failed", error: error.message });
   }
 };
+
+class UserController {
+  getUserAccount = AsyncHandler(async (req, res) => {
+    const userId = req.params.user_id || req.user._id; // Get from params or authenticated user
+
+    // Fetch only the relevant fields for settings
+    const userAccount = await User.findById(userId)
+      .select('firstName lastName username email state bio profilePhoto coverPhoto contribution.total livelink preferences createdAt recentActivity')
+      .populate({
+        path: 'recentActivity',
+        select: 'content images likeCount commentCount shareCount viewsCount postType editedAt' // specify the fields you want
+      })
+      .populate({
+        path: 'followers',
+        select: 'followersCount'
+      })
+      .populate({
+        path: 'followings',
+        select: 'followingCount'
+      })
+      .lean();
+
+    if (!userAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: userAccount
+    });
+  });
+}
+export default new UserController();
+

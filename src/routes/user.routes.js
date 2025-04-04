@@ -2,12 +2,14 @@ import express from "express";
 import { upload } from "../middleware/file-upload.middleware.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import userSettingsController from "../controller/user.settings.controller.js";
+import  UserController  from "../controller/user.controller.js";
 
 const router = express.Router();
 
 router.use(authMiddleware);
 
 // Account routes
+router.get("/user/account", UserController.getUserAccount);
 router.get("/user/settings", userSettingsController.getUserSettings);
 
 router.put(

@@ -18,6 +18,11 @@ const userFollowingSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+  userFollowingSchema.pre('save', function(next) {
+  this.followingCount = this.following.length;
+  next();
+});
+
 // Index to optimize queries for checking if a user is following another
 userFollowingSchema.index({ user: 1, 'following': 1 });
 

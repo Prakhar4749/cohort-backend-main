@@ -52,12 +52,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: ""
     },
-    preferences: {
+    preferences: [{
       type: String,
       trim: true,
       lowercase: true,
       default: ""
-    },
+    }],
     verifiedNumber: {
       type: Number,
       default: 0
@@ -103,7 +103,7 @@ const userSchema = new mongoose.Schema(
       },
     },
     recentActivity:[
-      { type: mongoose.Schema.Types.ObjectId, ref: "post" }
+      { type: mongoose.Schema.Types.ObjectId, ref: "Post" }
     ],
 
     // Payment methods for future payments
@@ -125,6 +125,19 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Add this pre-save hook before creating the model
+userSchema.pre('save', function(next) {
+  // Calculate total contributions
+  this.contribution.total = 
+    this.contribution.posts + 
+    this.contribution.comments + 
+    this.contribution.likes + 
+    this.contribution.shares;
+  
+  next();
+});
+
 
 const User = mongoose.model("User", userSchema);
 export default User;

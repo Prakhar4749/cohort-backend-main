@@ -21,6 +21,12 @@ app.use(
 );
 
 // Place CORS middleware before other middleware
+
+// ✅ Allow all origins temporarily
+app.use(cors());
+
+/*
+// 🔒 Previous restricted CORS setup — commented out for now
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -33,7 +39,6 @@ app.use(
         // Add your Vercel frontend deployment URL
         "https://cohort-backend-main-kxzy2tv0c-prakhar-sakhares-projects.vercel.app",  // Matches any Vercel app subdomain
       ];
-      
 
       if (!origin || allowedOrigins.some(allowed => 
         allowed instanceof RegExp 
@@ -54,6 +59,7 @@ app.use(
     optionsSuccessStatus: 204,
   })
 );
+*/
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("common"));
