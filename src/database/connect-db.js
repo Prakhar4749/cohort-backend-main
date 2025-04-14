@@ -11,7 +11,7 @@ const Connectdb = async () => {
       console.log("Oops! Databse disconnected ❌")
     );
     await mongoose.connect(appEnvConfigs.DATABASE_URL);
-    await seedFAQs(true); // Pass 'true' to force reset FAQs
+    await seedFAQs(); // Pass 'true' to force reset FAQs
   } catch (error) {
     console.log(error);
     process.exit(1);

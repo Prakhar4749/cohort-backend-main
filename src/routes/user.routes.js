@@ -9,7 +9,14 @@ const router = express.Router();
 router.use(authMiddleware);
 
 // Account routes
+
 router.get("/user/account", UserController.getUserAccount);
+// update preferences 
+router.put("/user/preferences", UserController.updatePreferences);
+// delete preferences 
+router.put("/user/preferences/delete", UserController.deletePreferences);
+
+
 router.get("/user/settings", userSettingsController.getUserSettings);
 
 router.put(

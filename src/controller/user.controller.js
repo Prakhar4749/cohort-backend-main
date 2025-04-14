@@ -246,6 +246,145 @@ class UserController {
       data: userAccount
     });
   });
+
+  updatePreferences = AsyncHandler(async (req, res) => {
+    const userId = req.params.user_id || req.user._id;
+    const  { newPreferences }  = req.body;
+    
+    if (!newPreferences || !Array.isArray(newPreferences)) {
+      res.status(400);
+      throw new Error('New preferences must be provided as an array');
+    }
+    
+    // Find the user
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      res.status(404);
+      throw new Error('User not found');
+    }
+    
+    // Process new preferences - convert to lowercase, trim, and remove duplicates
+    const processedPreferences = newPreferences.map(pref => 
+      pref.trim().toLowerCase()
+    ).filter(pref => pref !== "");
+    
+    // If user has no preferences yet or empty array
+    if (!user.preferences || user.preferences.length === 0 || 
+        (user.preferences.length === 1 && user.preferences[0] === "")) {
+      user.preferences = processedPreferences;
+    } else {
+      // Add new preferences avoiding duplicates
+      const existingPreferences = new Set(user.preferences);
+      processedPreferences.forEach(pref => {
+        existingPreferences.add(pref);
+      });
+      user.preferences = Array.from(existingPreferences);
+    }
+    
+    // Save the updated user
+    await user.save();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Preferences updated successfully',
+      preferences: user.preferences
+    });
+  });
+
+  
+  // Deletes a specific preference from user preferences
+  
+  deletePreferences = AsyncHandler(async (req, res) => {
+    const userId = req.params.user_id || req.user._id;
+    const { preferences } = req.body;
+    
+    // Check if preferences is provided as a string or an array
+    let prefsToDelete = [];
+    
+    if (typeof preferences === 'string') {
+      // Single preference as string
+      prefsToDelete = [preferences.trim().toLowerCase()];
+    } else if (Array.isArray(preferences)) {
+      // Multiple preferences as array
+      prefsToDelete = preferences.map(pref => 
+        typeof pref === 'string' ? pref.trim().toLowerCase() : ''
+      ).filter(pref => pref !== '');
+    } else {
+      res.status(400);
+      throw new Error('Preferences to delete must be provided as a string or an array of strings');
+    }
+    
+    if (prefsToDelete.length === 0) {
+      res.status(400);
+      throw new Error('No valid preferences provided for deletion');
+    }
+    
+    // Find the user
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      res.status(404);
+      throw new Error('User not found');
+    }
+    
+    // Check if user has preferences
+    if (!user.preferences || user.preferences.length === 0 || 
+        (user.preferences.length === 1 && user.preferences[0] === "")) {
+      res.status(400);
+      throw new Error('User has no preferences to delete');
+    }
+    
+    // Track which preferences were found and deleted
+    const deletedPrefs = [];
+    const notFoundPrefs = [];
+    
+    // Create a set of preferences for easier lookup
+    const prefsSet = new Set(prefsToDelete);
+    
+    // Filter out the preferences to delete
+    const originalPrefs = [...user.preferences];
+    user.preferences = user.preferences.filter(pref => {
+      const shouldDelete = prefsSet.has(pref);
+      if (shouldDelete) {
+        deletedPrefs.push(pref);
+      }
+      return !shouldDelete;
+    });
+    
+    // Find which preferences were not found
+    prefsToDelete.forEach(pref => {
+      if (!originalPrefs.includes(pref)) {
+        notFoundPrefs.push(pref);
+      }
+    });
+    
+    // If nothing was deleted
+    if (deletedPrefs.length === 0) {
+      res.status(404);
+      throw new Error('None of the specified preferences were found in user preferences');
+    }
+    
+    // If all preferences were deleted, keep an empty string as default
+    if (user.preferences.length === 0) {
+      user.preferences = [""];
+    }
+    
+    // Save the updated user
+    await user.save();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Preferences deleted successfully',
+      deletedPreferences: deletedPrefs,
+      notFoundPreferences: notFoundPrefs.length > 0 ? notFoundPrefs : undefined,
+      currentPreferences: user.preferences
+    });
+  });
+
+  
+
+
 }
 export default new UserController();
 
