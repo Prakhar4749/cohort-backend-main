@@ -1,9 +1,10 @@
 import { Router } from "express";
-
+import { authMiddleware } from "../middleware/auth.middleware.js";
 import { PostController } from "../controller/post.controller.js";
 import { upload } from "../middleware/file-upload.middleware.js";
 
 const PostRouter = Router();
+PostRouter.use(authMiddleware);
 
 // ✅ Post Routes
 PostRouter.route("/posts/:userid/community/:communityid").post(
@@ -21,7 +22,7 @@ PostRouter.route("/posts/:postid/likes/:userid").post(
 );
 
 // GetPostStats
-PostRouter.route("/posts/:id").get(PostController.GetPostStats);
+PostRouter.route("/posts/:postid").get(PostController.GetPostStats);
 
 // ✅ Comment Routes (Nested under /posts/:id/comments)
 PostRouter.route("/posts/:postid/comments/:userid").post(

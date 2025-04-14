@@ -27,13 +27,23 @@ export class PostController {
 
   // SEARCH POST
 
-  static UserId = "67a6d128a0a744491e097cf6";
+  // static UserId = "67a6d128a0a744491e097cf6";
 
   // ✅ CREATE POST
   static CreatePost = AsyncHandler(async (req, res) => {
-    const { content } = req.body;
-    const { userid: userId, communityid: communityId } = req.params;
+    // Fix for content handling
+    let content;
+    if (typeof req.body.content === 'object') {
+        content = req.body.content.content;
+    } else {
+        content = req.body.content;
+    }
+    
     if (!content) throw new ApiError(401, "Please provide valid content");
+    
+    const { userid: userId, communityid: communityId } = req.params;
+    
+    // Find user and community
     const [community, user] = await Promise.all([
       communityId ? PostController.#findCommunity(communityId) : null,
       PostController.#findUserById(userId),
@@ -44,26 +54,34 @@ export class PostController {
 
     if (!user) throw new ApiError(404, "User not found");
 
+    // Process files
     const postImgs = req.files ? req.files.map((file) => file.path) : [];
     if (postImgs.length > 3)
       throw new ApiError(400, "You can upload a maximum of 3 images.");
 
     const images =
       postImgs.length > 0 ? await GetImageUrlFromCloudinary(postImgs) : [];
+    
+    // Create post
     const newPost = await Post.create({
       content,
       images,
       user: userId,
       community: communityId,
     });
-    community.communityPosts.push(newPost._id);
-    await community.save();
+    
+    // Only update community if it exists
+    if (community && community.communityPosts) {
+      community.communityPosts.push(newPost._id);
+      await community.save();
+    }
+    
     res
       .status(201)
       .json(new ApiResponse(201, "Post created successfully", newPost));
-  });
+});
 
-  // ✅ GET ALL POSTS
+  // ✅ GET ALL POSTS of community
   static GetAllPosts = AsyncHandler(async (req, res) => {
     const { communityid } = req.params;
 
@@ -118,7 +136,7 @@ export class PostController {
 
   // ✅ GET TOTAL LIKE AND COMMENTS AND SHARE STATS
   static GetPostStats = AsyncHandler(async (req, res) => {
-    const postId = req.params.id;
+    const postId = req.params.postid;
     const existingPost = await PostController.#findPostById(postId);
     if (!existingPost) throw new ApiError(404, "Post not found");
 
