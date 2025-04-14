@@ -6,6 +6,13 @@ import { upload } from "../middleware/file-upload.middleware.js";
 const PostRouter = Router();
 PostRouter.use(authMiddleware);
 
+
+// ✅ Trending Post Routes
+PostRouter.route("/posts/trending").get(PostController.GetTrendingPosts);
+
+// ✅  PERSONLISED Trending Post Routes
+PostRouter.route("/posts/user/trending").get(PostController.GetPersonalizedTrendingPosts);
+
 // ✅ Post Routes
 PostRouter.route("/posts/:userid/community/:communityid").post(
   upload.array("postImgs", 3),
@@ -40,8 +47,6 @@ PostRouter.route("/posts/:postid/pin/:userid").post(
   PostController.TogglePinPost
 );
 
-// ✅ Trending Post Routes
-PostRouter.route("/posts/trending").get(PostController.GetTrendingPosts);
 
 // ✅ Polling Post Routes
 PostRouter.route("/communities/:id/poll").post(PostController.CreatePoll);
