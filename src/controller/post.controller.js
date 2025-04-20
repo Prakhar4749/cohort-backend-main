@@ -1,4 +1,4 @@
-import { ApiError, ApiResponse, AsyncHandler } from "../utils/server-utils.js";
+import { ApiError, ApiResponse, AsyncHandler } from "../utils/responseUtils.js";
 import { GetImageUrlFromCloudinary } from "../libs/cloudinary/cloudinaryUploader.js";
 import Post from "../models/post/post.model.js";
 import Comment from "../models/post/comment.model.js";
@@ -33,16 +33,16 @@ export class PostController {
   static CreatePost = AsyncHandler(async (req, res) => {
     // Fix for content handling
     let content;
-    if (typeof req.body.content === 'object') {
-        content = req.body.content.content;
+    if (typeof req.body.content === "object") {
+      content = req.body.content.content;
     } else {
-        content = req.body.content;
+      content = req.body.content;
     }
-    
+
     if (!content) throw new ApiError(401, "Please provide valid content");
-    
+
     const { userid: userId, communityid: communityId } = req.params;
-    
+
     // Find user and community
     const [community, user] = await Promise.all([
       communityId ? PostController.#findCommunity(communityId) : null,
@@ -61,7 +61,7 @@ export class PostController {
 
     const images =
       postImgs.length > 0 ? await GetImageUrlFromCloudinary(postImgs) : [];
-    
+
     // Create post
     const newPost = await Post.create({
       content,
@@ -69,17 +69,17 @@ export class PostController {
       user: userId,
       community: communityId,
     });
-    
+
     // Only update community if it exists
     if (community && community.communityPosts) {
       community.communityPosts.push(newPost._id);
       await community.save();
     }
-    
+
     res
       .status(201)
       .json(new ApiResponse(201, "Post created successfully", newPost));
-});
+  });
 
   // ✅ GET ALL POSTS of community
   static GetAllPosts = AsyncHandler(async (req, res) => {
@@ -224,7 +224,7 @@ export class PostController {
 
     const allComments = await Comment.find({ post: postid })
       .sort({ createdAt: -1 })
-      .populate('user', 'name username email')
+      .populate("user", "name username email");
     res.json(
       new ApiResponse(200, "All comments fetched successfully", allComments)
     );
@@ -257,170 +257,193 @@ export class PostController {
       .json(new ApiResponse(201, "Post shared successfully", postLinks));
   });
 
-// ✅ GET TRENDING POST
-static GetTrendingPosts = AsyncHandler(async (req, res) => {
-  // Since we're using AsyncHandler, we don't need the try-catch block
-  const trendingPosts = await Post.aggregate([
-    {
-      $addFields: {
-        ageInHours: {
-          $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000],
+  // ✅ GET TRENDING POST
+  static GetTrendingPosts = AsyncHandler(async (req, res) => {
+    // Since we're using AsyncHandler, we don't need the try-catch block
+    const trendingPosts = await Post.aggregate([
+      {
+        $addFields: {
+          ageInHours: {
+            $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000],
+          },
         },
       },
-    },
-    {
-      $addFields: {
-        trendingScore: {
-          $divide: [
-            {
-              $add: [
-                { $multiply: ["$likeCount", 2] },
-                { $multiply: ["$commentCount", 3] },
-                { $multiply: ["$viewsCount", 1] },
-                { $multiply: ["$shareCount", 4] },
-              ],
-            },
-            {
-              $add: [1, "$ageInHours"], // Prevent division by zero
-            },
-          ],
+      {
+        $addFields: {
+          trendingScore: {
+            $divide: [
+              {
+                $add: [
+                  { $multiply: ["$likeCount", 2] },
+                  { $multiply: ["$commentCount", 3] },
+                  { $multiply: ["$viewsCount", 1] },
+                  { $multiply: ["$shareCount", 4] },
+                ],
+              },
+              {
+                $add: [1, "$ageInHours"], // Prevent division by zero
+              },
+            ],
+          },
         },
       },
-    },
-    { $sort: { trendingScore: -1 } },
-    { $limit: 10 },
-  ]);
+      { $sort: { trendingScore: -1 } },
+      { $limit: 10 },
+    ]);
 
-  res.status(200).json({ success: true, trendingPosts });
-});
-
-
-// ✅ GET PERSONALIZED TRENDING POSTS
-static GetPersonalizedTrendingPosts = AsyncHandler(async (req, res) => {
-  const userId = req.user._id; // Assuming userId comes from authenticated user
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
-  
-  // Get current user's preferences
-  const currentUser = await User.findById(userId);
-  if (!currentUser) {
-    res.status(404);
-    throw new Error('User not found');
-  }
-  
-  // Get user preferences (filtering out empty string if it exists)
-  const userPreferences = currentUser.preferences.filter(pref => pref !== "");
-  
-  // Find users with similar preferences - helps identify whose activity to prioritize
-  const usersWithSimilarPreferences = await User.find({
-    _id: { $ne: userId }, // Not the current user
-    preferences: { $in: userPreferences } // Has at least one matching preference
-  }).select('_id');
-  
-  const similarUserIds = usersWithSimilarPreferences.map(user => user._id);
-  
-  // Get posts engaged by users with similar preferences
-  const engagedPostsData = await Post.aggregate([
-    // Stage 1: Match posts that were engaged by users with similar preferences
-    {
-      $lookup: {
-        from: 'likes',
-        localField: '_id',
-        foreignField: 'postId',
-        as: 'likes'
-      }
-    },
-    {
-      $lookup: {
-        from: 'comments',
-        localField: '_id',
-        foreignField: 'postId',
-        as: 'comments'
-      }
-    },
-    {
-      $lookup: {
-        from: 'shares',
-        localField: '_id',
-        foreignField: 'postId',
-        as: 'shares'
-      }
-    },
-    // Stage 2: Add fields for calculations
-    {
-      $addFields: {
-        // Check if any users with similar preferences engaged with this post
-        similarUserEngagement: {
-          $sum: [
-            { $size: { $filter: { input: "$likes", as: "like", cond: { $in: ["$$like.userId", similarUserIds] } } } },
-            { $size: { $filter: { input: "$comments", as: "comment", cond: { $in: ["$$comment.userId", similarUserIds] } } } },
-            { $size: { $filter: { input: "$shares", as: "share", cond: { $in: ["$$share.userId", similarUserIds] } } } }
-          ]
-        },
-        // Standard engagement metrics
-        likeCount: { $size: "$likes" },
-        commentCount: { $size: "$comments" },
-        shareCount: { $size: "$shares" },
-        // Calculate age in hours
-        ageInHours: {
-          $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000]
-        }
-      }
-    },
-    // Stage 3: Calculate trending score with preference boost
-    {
-      $addFields: {
-        // Combined score including preference-based boost
-        trendingScore: {
-          $divide: [
-            {
-              $add: [
-                { $multiply: ["$likeCount", 2] },
-                { $multiply: ["$commentCount", 3] },
-                { $multiply: ["$viewsCount", 1] },
-                { $multiply: ["$shareCount", 4] },
-                // Boost for engagement by users with similar preferences (multiplier of 5)
-                { $multiply: ["$similarUserEngagement", 5] }
-              ]
-            },
-            {
-              $add: [1, "$ageInHours"] // Prevent division by zero
-            }
-          ]
-        }
-      }
-    },
-    // Stage 4: Sort by trending score
-    { $sort: { trendingScore: -1 } },
-    // Stage 5: Apply pagination
-    { $skip: skip },
-    { $limit: limit },
-    // Stage 6: Project to clean up response (remove temp fields we don't need)
-    {
-      $project: {
-        likes: 0, // Remove the likes array
-        comments: 0, // Remove the comments array
-        shares: 0, // Remove the shares array
-      }
-    }
-  ]);
-  
-  // Get total count for pagination info
-  const totalPosts = await Post.countDocuments();
-  
-  res.status(200).json({ 
-    success: true, 
-    posts: engagedPostsData,
-    pagination: {
-      currentPage: page,
-      totalPages: Math.ceil(totalPosts / limit),
-      totalPosts,
-      hasNextPage: page * limit < totalPosts,
-      hasPrevPage: page > 1
-    }
+    res.status(200).json({ success: true, trendingPosts });
   });
-});
+
+  // ✅ GET PERSONALIZED TRENDING POSTS
+  static GetPersonalizedTrendingPosts = AsyncHandler(async (req, res) => {
+    const userId = req.user._id; // Assuming userId comes from authenticated user
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get current user's preferences
+    const currentUser = await User.findById(userId);
+    if (!currentUser) {
+      res.status(404);
+      throw new Error("User not found");
+    }
+
+    // Get user preferences (filtering out empty string if it exists)
+    const userPreferences = currentUser.interests.filter((pref) => pref !== "");
+
+    // Find users with similar preferences - helps identify whose activity to prioritize
+    const usersWithSimilarPreferences = await User.find({
+      _id: { $ne: userId }, // Not the current user
+      interests: { $in: userPreferences }, // Has at least one matching preference
+    }).select("_id");
+
+    const similarUserIds = usersWithSimilarPreferences.map((user) => user._id);
+
+    // Get posts engaged by users with similar preferences
+    const engagedPostsData = await Post.aggregate([
+      // Stage 1: Match posts that were engaged by users with similar preferences
+      {
+        $lookup: {
+          from: "likes",
+          localField: "_id",
+          foreignField: "postId",
+          as: "likes",
+        },
+      },
+      {
+        $lookup: {
+          from: "comments",
+          localField: "_id",
+          foreignField: "postId",
+          as: "comments",
+        },
+      },
+      {
+        $lookup: {
+          from: "shares",
+          localField: "_id",
+          foreignField: "postId",
+          as: "shares",
+        },
+      },
+      // Stage 2: Add fields for calculations
+      {
+        $addFields: {
+          // Check if any users with similar preferences engaged with this post
+          similarUserEngagement: {
+            $sum: [
+              {
+                $size: {
+                  $filter: {
+                    input: "$likes",
+                    as: "like",
+                    cond: { $in: ["$$like.userId", similarUserIds] },
+                  },
+                },
+              },
+              {
+                $size: {
+                  $filter: {
+                    input: "$comments",
+                    as: "comment",
+                    cond: { $in: ["$$comment.userId", similarUserIds] },
+                  },
+                },
+              },
+              {
+                $size: {
+                  $filter: {
+                    input: "$shares",
+                    as: "share",
+                    cond: { $in: ["$$share.userId", similarUserIds] },
+                  },
+                },
+              },
+            ],
+          },
+          // Standard engagement metrics
+          likeCount: { $size: "$likes" },
+          commentCount: { $size: "$comments" },
+          shareCount: { $size: "$shares" },
+          // Calculate age in hours
+          ageInHours: {
+            $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000],
+          },
+        },
+      },
+      // Stage 3: Calculate trending score with preference boost
+      {
+        $addFields: {
+          // Combined score including preference-based boost
+          trendingScore: {
+            $divide: [
+              {
+                $add: [
+                  { $multiply: ["$likeCount", 2] },
+                  { $multiply: ["$commentCount", 3] },
+                  { $multiply: ["$viewsCount", 1] },
+                  { $multiply: ["$shareCount", 4] },
+                  // Boost for engagement by users with similar preferences (multiplier of 5)
+                  { $multiply: ["$similarUserEngagement", 5] },
+                ],
+              },
+              {
+                $add: [1, "$ageInHours"], // Prevent division by zero
+              },
+            ],
+          },
+        },
+      },
+      // Stage 4: Sort by trending score
+      { $sort: { trendingScore: -1 } },
+      // Stage 5: Apply pagination
+      { $skip: skip },
+      { $limit: limit },
+      // Stage 6: Project to clean up response (remove temp fields we don't need)
+      {
+        $project: {
+          likes: 0, // Remove the likes array
+          comments: 0, // Remove the comments array
+          shares: 0, // Remove the shares array
+        },
+      },
+    ]);
+
+    // Get total count for pagination info
+    const totalPosts = await Post.countDocuments();
+
+    res.status(200).json({
+      success: true,
+      posts: engagedPostsData,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalPosts / limit),
+        totalPosts,
+        hasNextPage: page * limit < totalPosts,
+        hasPrevPage: page > 1,
+      },
+    });
+  });
 
   // ✅ CREATE POLLS
   static CreatePoll = AsyncHandler(async (req, res) => {

@@ -1,6 +1,6 @@
 // controllers/faqController.js
 import FAQ from '../models/other/faqModel.js';
-import { AsyncHandler } from '../utils/server-utils.js';
+import { AsyncHandler } from "../utils/responseUtils.js";
 
 export const getAllFAQs = AsyncHandler(async (req, res) => {
   const faqs = await FAQ.find().sort({ popularity: -1 });

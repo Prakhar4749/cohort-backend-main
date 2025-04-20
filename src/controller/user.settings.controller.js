@@ -4,7 +4,7 @@ import User from "../models/users/user.model.js";
 import { userTransaction } from "../models/users/user.transaction.model.js";
 import { userPermissions } from "../models/users/user.permission.model.js";
 import { GetImageUrlFromCloudinary } from "../libs/cloudinary/cloudinaryUploader.js";
-import { ApiError, ApiResponse, AsyncHandler } from "../utils/server-utils.js";
+import { ApiError, ApiResponse, AsyncHandler } from "../utils/responseUtils.js";
 
 class userSettingsController {
   // Private methods using closure

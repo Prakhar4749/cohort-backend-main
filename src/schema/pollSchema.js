@@ -1,14 +1,23 @@
-import { z } from "zod";
-const pollSchema = z.object({
-  title: z.string().min(5, "Title must be at least 5 characters"),
-  question: z.string().min(10, "Question must be at least 10 characters"),
-  options: z
-    .array(z.string().min(1, "Option cannot be empty"))
-    .min(2, "At least 2 options required"),
-  expiredAt: z.preprocess(
-    (arg) => new Date(arg),
-    z.date().min(new Date(), "Expiration date must be in the future")
-  ),
+import Joi from "joi";
+
+const pollSchema = Joi.object({
+  title: Joi.string()
+    .min(5)
+    .message("Title must be at least 5 characters")
+    .required(),
+  question: Joi.string()
+    .min(10)
+    .message("Question must be at least 10 characters")
+    .required(),
+  options: Joi.array()
+    .items(Joi.string().min(1).message("Option cannot be empty"))
+    .min(2)
+    .message("At least 2 options required")
+    .required(),
+  expiredAt: Joi.date()
+    .greater("now") // Ensures the date is in the future
+    .message("Expiration date must be in the future")
+    .required(),
 });
 
 export default pollSchema;

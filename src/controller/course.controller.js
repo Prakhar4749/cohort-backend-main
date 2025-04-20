@@ -1,4 +1,4 @@
-import { ApiError, ApiResponse, AsyncHandler } from "../utils/server-utils.js";
+import { ApiError, ApiResponse, AsyncHandler } from "../utils/responseUtils.js";
 import { GetImageUrlFromCloudinary } from "../libs/cloudinary/cloudinaryUploader.js";
 import Course from "../models/lessons/course.model.js";
 import UserEnrollment from "../models/lessons/user-enrollment.js";

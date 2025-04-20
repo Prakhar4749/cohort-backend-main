@@ -2,20 +2,23 @@ import cors from "cors";
 import express from "express";
 import morgan from "morgan";
 import helmet from "helmet";
-import { ApiError } from "./utils/server-utils.js";
+import passport from "passport";
+import { ApiError } from "./utils/responseUtils.js";
 import authRoutes from "./routes/authRoutes.js";
 import CommunityRouter from "./routes/community.routes.js";
 import CourseRouter from "./routes/course.routes.js";
 import settingsRoutes from "./routes/user.routes.js";
-import supportRoutes from "./routes/support.routes.js"
+import supportRoutes from "./routes/support.routes.js";
 import { appEnvConfigs } from "./configs/env_config.js";
-import PostRouter from "./routes/post.routes.js";
+import postRouter from "./routes/post.routes.js";
 import { seedFAQs } from "./utils/dbSeeder.js";
+
+import { authMiddleware } from "./middleware/auth.middleware.js";
 
 // CONFIGS
 export const app = express();
 
-// MIDDLEWARES
+// Middleware
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -66,23 +69,47 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("common"));
 
+// Initialize Passport
+app.use(passport.initialize());
 
 // ROUTES
-app.use("/api/v1", authRoutes);
-app.use("/api/v1", PostRouter);
-app.use("/api/v1", CommunityRouter);
-app.use("/api/v1", CourseRouter);
-app.use("/api/v1", settingsRoutes);
-app.use("/api/v1", supportRoutes);
+const v1Router = express.Router();
+
+// Public (no auth)
+v1Router.use(authRoutes);
+
+// Protected
+v1Router.use(authMiddleware); // All below will need token
+// v1Router.use(postRoutes);
+// v1Router.use(communityRoutes);
+// v1Router.use(courseRoutes);
+v1Router.use(settingsRoutes);
+v1Router.use(supportRoutes);
+
+app.use("/api/v1", v1Router);
+
+// app.use("/api/v1", authRoutes);
+// app.use("/api/v1", postRouter);
+// app.use("/api/v1", CommunityRouter);
+// app.use("/api/v1", CourseRouter);
+// app.use("/api/v1", settingsRoutes);
+// app.use("/api/v1", supportRoutes);
 
 // GLOBAL ERROR HANDLER
-app.use((err, _req, res, next) => {
+app.use((err, _req, res, _next) => {
+  // Handle custom ApiError
   if (err instanceof ApiError) {
     return res.status(err.statusCode).json({
+      status: err.status ?? "error",
       message: err.message,
-      statusCode: err.statusCode,
-      status: err.status ?? "failed",
+      errors: err.errors ?? [],
     });
   }
-  next(err);
+
+  // Handle other (unexpected) errors
+  console.error("[Unhandled Error]", err);
+  return res.status(500).json({
+    status: "error",
+    message: "Internal Server Error",
+  });
 });

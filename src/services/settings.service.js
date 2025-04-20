@@ -3,7 +3,7 @@ import { userPermissions } from "../models/users/user.permission.model.js";
 import UserFollower from "../models/users/user.followers.model.js";
 import UserFollowing from "../models/users/user.followings.model.js";
 import mongoose from "mongoose";
-import { AsyncHandler } from "../utils/server-utils.js";
+import { AsyncHandler } from "../utils/responseUtils.js";
 
 export const createDefaultSettings = AsyncHandler(async (userId) => {
   // Create all documents

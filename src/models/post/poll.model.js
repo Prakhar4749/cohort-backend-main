@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
-import moment from "moment";
+import { parse, format } from "date-fns";
+
 const pollSchema = new mongoose.Schema({
   postId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -27,7 +28,10 @@ const pollSchema = new mongoose.Schema({
 
 pollSchema.pre("save", function (next) {
   if (typeof this.expiredAt === "string") {
-    this.expiredAt = moment(this.expiredAt, "DD/MM/YYYY").toISOString();
+    this.expiredAt = format(
+      parse(this.expiredAt, "dd/MM/yyyy", new Date()),
+      "yyyy-MM-dd'T'HH:mm:ss.SSSxxx"
+    );
   }
   next();
 });

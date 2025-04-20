@@ -1,4 +1,4 @@
-import { ApiError, ApiResponse, AsyncHandler } from "../utils/server-utils.js";
+import { ApiError, ApiResponse, AsyncHandler } from "../utils/responseUtils.js";
 import { GetImageUrlFromCloudinary } from "../libs/cloudinary/cloudinaryUploader.js";
 import Community from "../models/community/community.model.js";
 import User from "../models/users/user.model.js";
@@ -14,27 +14,37 @@ export class CommunityController {
 
   static #handleFileUploads = async (files) => {
     const updateData = {};
-    
+
     try {
       // Handle profile photo upload (single file)
-      if (files?.communityProfileImage && files.communityProfileImage.length > 0) {
-        updateData.profilePhoto = await GetImageUrlFromCloudinary([files.communityProfileImage[0].path]);
+      if (
+        files?.communityProfileImage &&
+        files.communityProfileImage.length > 0
+      ) {
+        updateData.profilePhoto = await GetImageUrlFromCloudinary([
+          files.communityProfileImage[0].path,
+        ]);
       }
-      
+
       // Handle cover photos upload (multiple files)
-      if (files?.communityCoverImages && files.communityCoverImages.length > 0) {
-        const coverPhotoPaths = files.communityCoverImages.map(file => file.path);
-        updateData.coverPhoto = await GetImageUrlFromCloudinary(coverPhotoPaths);
+      if (
+        files?.communityCoverImages &&
+        files.communityCoverImages.length > 0
+      ) {
+        const coverPhotoPaths = files.communityCoverImages.map(
+          (file) => file.path
+        );
+        updateData.coverPhoto =
+          await GetImageUrlFromCloudinary(coverPhotoPaths);
       }
-      
+
       console.log("File upload update data:", updateData);
       return updateData;
     } catch (error) {
       console.error("Error in file upload handling:", error);
       throw new ApiError(400, "Failed to upload files");
     }
-  }
-  
+  };
 
   static isUserCommunityAdmin = async (userId, communityId) => {
     try {
@@ -69,7 +79,7 @@ export class CommunityController {
       membershipType,
       socialAccounts,
     } = req.body;
-  
+
     // Validate required fields
     if (
       !communityName?.trim() ||
@@ -78,10 +88,10 @@ export class CommunityController {
     ) {
       throw new ApiError(400, "Please provide valid fields.");
     }
-  
+
     // Handle File Uploads
     const uploadedFiles = await this.#handleFileUploads(req.files);
-  
+
     // Create new community
     const newCommunity = await Community.create({
       communityName: communityName.trim(),
@@ -104,28 +114,28 @@ export class CommunityController {
       },
       owner: req.user._id,
     });
-  
+
     // Create permission
     const permissions = new communityPermissions({
       community: newCommunity._id,
     });
-  
+
     await permissions.save();
-  
+
     // Update the community with references
     await mongoose.model("Community").findByIdAndUpdate(newCommunity._id, {
       $set: {
         "settings.permissions": permissions._id,
       },
     });
-  
+
     // Create membership
     const membership = await Membership.create({
       userId: req.user._id,
       communityId: newCommunity._id,
       role: "admin",
     });
-  
+
     res
       .status(201)
       .json(
@@ -256,29 +266,35 @@ export class CommunityController {
     const updateData = {};
 
     // Add fields to update
-    if (req.body.communityName) updateData.communityName = req.body.communityName;
-    if (req.body.communityDescription) updateData.communityDescription = req.body.communityDescription;
-    if (req.body.communityUsername) updateData.communityUsername = req.body.communityUsername;
+    if (req.body.communityName)
+      updateData.communityName = req.body.communityName;
+    if (req.body.communityDescription)
+      updateData.communityDescription = req.body.communityDescription;
+    if (req.body.communityUsername)
+      updateData.communityUsername = req.body.communityUsername;
     if (req.body.type && ["Public", "Private"].includes(req.body.type)) {
       updateData.type = req.body.type;
     }
-    if (req.body.membershipType && ["Free", "Paid"].includes(req.body.membershipType)) {
+    if (
+      req.body.membershipType &&
+      ["Free", "Paid"].includes(req.body.membershipType)
+    ) {
       updateData.membershipType = req.body.membershipType;
     }
 
     // Handle file uploads
     if (req.files) {
       const fileUpdateData = await this.#handleFileUploads(req.files);
-      
+
       if (fileUpdateData.profilePhoto) {
         updateData.communityProfileImage = fileUpdateData.profilePhoto;
       }
-      
+
       if (fileUpdateData.coverPhoto) {
-        updateData.$push = { 
-          communityCoverImages: { 
-            $each: fileUpdateData.coverPhoto 
-          } 
+        updateData.$push = {
+          communityCoverImages: {
+            $each: fileUpdateData.coverPhoto,
+          },
         };
       }
     }
@@ -287,9 +303,9 @@ export class CommunityController {
     if (req.body.settings && req.body.settings.permissions) {
       const permissions = req.body.settings.permissions;
       updateData.$set = {
-        'settings.permissions.canPost': permissions.canPost,
-        'settings.permissions.canChat': permissions.canChat,
-        'settings.permissions.canAddMembers': permissions.canAddMembers
+        "settings.permissions.canPost": permissions.canPost,
+        "settings.permissions.canChat": permissions.canChat,
+        "settings.permissions.canAddMembers": permissions.canAddMembers,
       };
     }
 
@@ -299,18 +315,18 @@ export class CommunityController {
         ...updateData.$set,
         socialAccounts: {
           ...updateData.socialAccounts,
-          ...req.body.socialAccounts
-        }
+          ...req.body.socialAccounts,
+        },
       };
     }
 
     // Update the community
     const updatedCommunity = await Community.findByIdAndUpdate(
-      communityId, 
-      updateData, 
-      { 
-        new: true,  // Return the modified document
-        runValidators: true  // Run model validations
+      communityId,
+      updateData,
+      {
+        new: true, // Return the modified document
+        runValidators: true, // Run model validations
       }
     );
 
@@ -318,8 +334,12 @@ export class CommunityController {
       throw new ApiError(404, "Community not found");
     }
 
-    res.status(200).json(new ApiResponse(200, "Community updated successfully", updatedCommunity));
-});
+    res
+      .status(200)
+      .json(
+        new ApiResponse(200, "Community updated successfully", updatedCommunity)
+      );
+  });
 
   static deleteCommunityAsOwner = AsyncHandler(async (req, res) => {
     const userId = req.user._id;

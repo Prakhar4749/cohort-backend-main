@@ -1,7 +1,7 @@
 // controllers/suggestionController.js
 import Suggestion from '../models/other/suggestionModel.js';
 import { sendEmailNotification } from '../utils/emailService.js';
-import { AsyncHandler } from '../utils/server-utils.js';
+import { AsyncHandler } from "../utils/responseUtils.js";
 
 export const createSuggestion = AsyncHandler(async (req, res) => {
   const { subject, description } = req.body;
