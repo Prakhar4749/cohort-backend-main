@@ -47,6 +47,22 @@ const CommunitySchema = new mongoose.Schema(
     communityCoverImages: {
       type: [String],
     },
+    interests: {
+          type: [String],
+          validate: {
+            validator: function (v) {
+              // Each interest must be 1-30 chars, array max length 20
+              return (
+                v.length <= 20 &&
+                v.every((interest) => interest.length >= 1 && interest.length <= 30)
+              );
+            },
+            message:
+              "Interests must be between 1-30 characters, maximum 20 interests",
+          },
+          default: [],
+        },
+    
     // Owner of the community
     owner: {
       type: mongoose.Schema.Types.ObjectId,

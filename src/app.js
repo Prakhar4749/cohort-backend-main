@@ -14,6 +14,7 @@ import postRouter from "./routes/post.routes.js";
 import { seedFAQs } from "./utils/dbSeeder.js";
 
 import { authMiddleware } from "./middleware/auth.middleware.js";
+import PostRouter from "./routes/post.routes.js";
 
 // CONFIGS
 export const app = express();
@@ -80,7 +81,7 @@ v1Router.use(authRoutes);
 
 // Protected
 v1Router.use(authMiddleware); // All below will need token
-// v1Router.use(postRoutes);
+v1Router.use(PostRouter);
 // v1Router.use(communityRoutes);
 // v1Router.use(courseRoutes);
 v1Router.use(settingsRoutes);

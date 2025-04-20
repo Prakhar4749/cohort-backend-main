@@ -219,14 +219,81 @@ export class PostController {
   // ✅ GET COMMENTS FOR A POST
   static GetPostComments = AsyncHandler(async (req, res) => {
     const { postid } = req.params;
+
+    // Find post first to validate it exists
     const existingPost = await PostController.#findPostById(postid);
     if (!existingPost) throw new ApiError(404, "Post not found");
 
-    const allComments = await Comment.find({ post: postid })
-      .sort({ createdAt: -1 })
-      .populate("user", "name username email");
+    // Use the static method from your Comment model to get comments with replies
+    const comments = await Comment.getPostComments(postid);
+
     res.json(
-      new ApiResponse(200, "All comments fetched successfully", allComments)
+      new ApiResponse(200, "All comments fetched successfully", comments)
+    );
+  });
+
+  // ✅ GET A SINGLE COMMENT WITH REPLIES
+  static GetCommentWithReplies = AsyncHandler(async (req, res) => {
+    const { commentId } = req.params;
+
+    // Use the static method from your Comment model
+    const comment = await Comment.findWithReplies(commentId);
+
+    if (!comment) throw new ApiError(404, "Comment not found");
+
+    res.json(
+      new ApiResponse(200, "Comment fetched successfully", comment)
+    );
+  });
+
+  // ✅ GET PAGINATED COMMENTS FOR A POST
+  static GetPaginatedComments = AsyncHandler(async (req, res) => {
+    const { postId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+
+    // Find post first to validate it exists
+    const existingPost = await PostController.#findPostById(postId);
+    if (!existingPost) throw new ApiError(404, "Post not found");
+
+    // Convert query params to numbers
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+
+    // Query for top-level comments only
+    const query = {
+      post: postId,
+      parentComment: null
+    };
+
+    // Get total count for pagination
+    const totalComments = await Comment.countDocuments(query);
+
+    // Get paginated top-level comments with their replies
+    const comments = await Comment.find(query)
+      .sort({ createdAt: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum)
+      .populate("user", "username profileImage")
+      .populate({
+        path: "replies",
+        options: { sort: { createdAt: 1 } },
+        populate: {
+          path: "user",
+          select: "username profileImage"
+        }
+      });
+
+    res.json(
+      new ApiResponse(200, "Comments fetched successfully", {
+        comments,
+        pagination: {
+          totalComments,
+          totalPages: Math.ceil(totalComments / limitNum),
+          currentPage: pageNum,
+          hasNextPage: pageNum < Math.ceil(totalComments / limitNum),
+          hasPrevPage: pageNum > 1
+        }
+      })
     );
   });
 

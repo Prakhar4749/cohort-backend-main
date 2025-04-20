@@ -35,7 +35,14 @@ PostRouter.route("/posts/:postid").get(PostController.GetPostStats);
 PostRouter.route("/posts/:postid/comments/:userid").post(
   PostController.CreateComment
 );
+
 PostRouter.route("/posts/:postid/comments").get(PostController.GetPostComments);
+
+PostRouter.route('/comments/:commentId').get(PostController.GetCommentWithReplies);
+
+PostRouter.route('/posts/:postId/comments/paginated').get(PostController.GetPaginatedComments);
+
+
 
 // ✅ Share Routes (Nested under /posts/:id/shares)
 PostRouter.route("/posts/:postid/shares/:userid").post(
