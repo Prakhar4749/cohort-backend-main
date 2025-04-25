@@ -12,6 +12,7 @@ import supportRoutes from "./routes/support.routes.js";
 import { appEnvConfigs } from "./configs/env_config.js";
 import postRouter from "./routes/post.routes.js";
 import { seedFAQs } from "./utils/dbSeeder.js";
+import { renewToken } from './utils/tokenRenewal.js';
 
 import { authMiddleware } from "./middleware/auth.middleware.js";
 import PostRouter from "./routes/post.routes.js";
@@ -81,6 +82,7 @@ v1Router.use(authRoutes);
 
 // Protected
 v1Router.use(authMiddleware); // All below will need token
+v1Router.use(renewToken);     // Add token renewal after auth check
 v1Router.use(PostRouter);
 v1Router.use(CommunityRouter);
 // v1Router.use(courseRoutes);
