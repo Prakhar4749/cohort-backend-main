@@ -82,7 +82,7 @@ v1Router.use(authRoutes);
 // Protected
 v1Router.use(authMiddleware); // All below will need token
 v1Router.use(PostRouter);
-// v1Router.use(communityRoutes);
+v1Router.use(CommunityRouter);
 // v1Router.use(courseRoutes);
 v1Router.use(settingsRoutes);
 v1Router.use(supportRoutes);

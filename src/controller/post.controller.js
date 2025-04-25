@@ -81,18 +81,42 @@ export class PostController {
       .json(new ApiResponse(201, "Post created successfully", newPost));
   });
 
-  // ✅ GET ALL POSTS of community
-  static GetAllPosts = AsyncHandler(async (req, res) => {
-    const { communityid } = req.params;
+  // ✅ GET ALL POSTS of community with pagination
+static GetAllPosts = AsyncHandler(async (req, res) => {
+  const { communityid } = req.params;
+  
+  // Get pagination parameters with defaults
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
 
-    const community = await PostController.#findCommunity(communityid);
-    if (!community) throw new ApiError(404, "Community not found");
-    const allPosts = await Post.find({
-      community: community._id,
-    }).sort({ createdAt: -1 });
-    res.json(new ApiResponse(200, "All posts fetched successfully", allPosts));
-  });
-
+  const community = await PostController.#findCommunity(communityid);
+  if (!community) throw new ApiError(404, "Community not found");
+  
+  // Get posts with pagination
+  const allPosts = await Post.find({
+    community: community._id,
+  })
+  .sort({ createdAt: -1 })
+  .skip(skip)
+  .limit(limit);
+  
+  // Get total count for pagination info
+  const total = await Post.countDocuments({ community: community._id });
+  const totalPages = Math.ceil(total / limit);
+  
+  res.json(new ApiResponse(200, "All posts fetched successfully", {
+    posts: allPosts,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1
+    }
+  }));
+});
   // ✅ TOGGLE LIKE DISLIKE
   static ToggleLikePost = AsyncHandler(async (req, res) => {
     const { postid, userid } = req.params;
@@ -323,6 +347,92 @@ export class PostController {
       .status(201)
       .json(new ApiResponse(201, "Post shared successfully", postLinks));
   });
+
+  // ✅ Get trending for a perticular community 
+  static GetTrendingPostsByCommunity = AsyncHandler(async (req, res) => {
+    // Get the community ID from the request parameters or query
+    const { communityid } = req.params || req.query;
+    
+    // Get pagination parameters with defaults
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    
+    // Validate if communityId is provided
+    if (!communityid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Community ID is required" 
+      });
+    }
+  
+    // Add a match stage to filter by community
+    const trendingPosts = await Post.aggregate([
+      // First match posts from the specified community
+      {
+        $match: {
+          community: new mongoose.Types.ObjectId(communityid)
+        }
+      },
+      {
+        $addFields: {
+          ageInHours: {
+            $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000],
+          },
+        },
+      },
+      {
+        $addFields: {
+          trendingScore: {
+            $divide: [
+              {
+                $add: [
+                  { $multiply: ["$likeCount", 2] },
+                  { $multiply: ["$commentCount", 3] },
+                  { $multiply: ["$viewsCount", 1] },
+                  { $multiply: ["$shareCount", 4] },
+                ],
+              },
+              {
+                $add: [1, "$ageInHours"], // Prevent division by zero
+              },
+            ],
+          },
+        },
+      },
+      { $sort: { trendingScore: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+    ]);
+  
+    // Get total count for pagination info
+    const totalCount = await Post.aggregate([
+      {
+        $match: {
+          community: new mongoose.Types.ObjectId(communityid)
+        }
+      },
+      { $count: "total" }
+    ]);
+  
+    const total = totalCount.length > 0 ? totalCount[0].total : 0;
+    const totalPages = Math.ceil(total / limit);
+    
+    res.status(200).json({
+      success: true,
+      trendingPosts,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    });
+  });
+
+
 
   // ✅ GET TRENDING POST
   static GetTrendingPosts = AsyncHandler(async (req, res) => {

@@ -13,6 +13,9 @@ PostRouter.route("/posts/trending").get(PostController.GetTrendingPosts);
 // ✅  PERSONLISED Trending Post Routes
 PostRouter.route("/posts/user/trending").get(PostController.GetPersonalizedTrendingPosts);
 
+// ✅ community Trending Post Routes
+PostRouter.route("/posts/user/trending/:communityid").get(PostController.GetTrendingPostsByCommunity);
+
 // ✅ Post Routes
 PostRouter.route("/posts/:userid/community/:communityid").post(
   upload.array("postImgs", 3),

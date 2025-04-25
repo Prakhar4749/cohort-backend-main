@@ -175,7 +175,7 @@ export const login = AsyncHandler(async (req, res) => {
   });
 
   res.setHeader("Authorization", `Bearer ${token}`);
-  return successResponse(res, user.toJSON(), "Login successful");
+  return successResponse(res, { ...user.toJSON(), token}, "Login successful");
 });
 
 // export const login = async (req, res) => {

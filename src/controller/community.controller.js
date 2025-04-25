@@ -186,45 +186,67 @@ export class CommunityController {
       );
   });
 
-  // get all community of user as admin
+  // get all community of user as admin with pagination
+static getCommunitiesAsAdmin = AsyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  
+  // Get pagination parameters with defaults
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
 
-  static getCommunitiesAsAdmin = AsyncHandler(async (req, res) => {
-    const userId = req.user._id;
+  // Get communities the user is a member of as admin
+  const memberships = await Membership.find({
+    userId,
+    role: "admin",
+  }).populate("communityId");
 
-    // Get communities the user is a member of
-    const memberships = await Membership.find({
-      userId,
-      role: "admin",
-    }).populate("communityId");
+  const Communities = memberships.map((m) => m.communityId);
+  
+  // Create a query for the communities
+  const query = { _id: { $in: Communities } };
+  const projection = {
+    communityName: 1,
+    communityUsername: 1,
+    communityDescription: 1,
+    communityProfileImage: 1,
+    type: 1,
+    membershipType: 1,
+  };
 
-    const Communities = memberships.map((m) => m.communityId);
+  // Get admin communities with pagination
+  const adminsCommunities = (
+    await Community.find(query, projection)
+      .sort({ updatedAt: -1 }) // ✅ Sort at query level
+      .skip(skip)
+      .limit(limit)
+      .lean()
+  ).map(({ _id, ...rest }) => ({ communityId: _id, ...rest }));
 
-    const adminsCommunities = (
-      await Community.find(
-        { _id: { $in: Communities } },
+  // Get total count for pagination info
+  const total = await Community.countDocuments(query);
+  const totalPages = Math.ceil(total / limit);
+
+  res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "all community of user as admin",
         {
-          communityName: 1,
-          communityUsername: 1,
-          communityDescription: 1,
-          communityProfileImage: 1,
-          type: 1,
-          membershipType: 1,
+          communities: adminsCommunities,
+          pagination: {
+            total,
+            page,
+            limit,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+          }
         }
       )
-        .sort({ updatedAt: -1 }) // ✅ Sort at query level
-        .lean()
-    ).map(({ _id, ...rest }) => ({ communityId: _id, ...rest }));
-
-    res
-      .status(200)
-      .json(
-        new ApiResponse(
-          200,
-          "all community of user as admin",
-          adminsCommunities
-        )
-      );
-  });
+    );
+});
 
   // Community settings
 
