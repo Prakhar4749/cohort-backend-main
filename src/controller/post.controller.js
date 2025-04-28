@@ -10,6 +10,7 @@ import User from "../models/users/user.model.js";
 import { appEnvConfigs } from "../configs/env_config.js";
 import pollSchema from "../schema/pollSchema.js";
 import mongoose from "mongoose";
+import { Membership } from "../models/community/membership.model.js";
 
 export class PostController {
   // 🔒 Private method to find a post by ID
@@ -82,41 +83,41 @@ export class PostController {
   });
 
   // ✅ GET ALL POSTS of community with pagination
-static GetAllPosts = AsyncHandler(async (req, res) => {
-  const { communityid } = req.params;
-  
-  // Get pagination parameters with defaults
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  static GetAllPosts = AsyncHandler(async (req, res) => {
+    const { communityid } = req.params;
 
-  const community = await PostController.#findCommunity(communityid);
-  if (!community) throw new ApiError(404, "Community not found");
-  
-  // Get posts with pagination
-  const allPosts = await Post.find({
-    community: community._id,
-  })
-  .sort({ createdAt: -1 })
-  .skip(skip)
-  .limit(limit);
-  
-  // Get total count for pagination info
-  const total = await Post.countDocuments({ community: community._id });
-  const totalPages = Math.ceil(total / limit);
-  
-  res.json(new ApiResponse(200, "All posts fetched successfully", {
-    posts: allPosts,
-    pagination: {
-      total,
-      page,
-      limit,
-      totalPages,
-      hasNextPage: page < totalPages,
-      hasPrevPage: page > 1
-    }
-  }));
-});
+    // Get pagination parameters with defaults
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const community = await PostController.#findCommunity(communityid);
+    if (!community) throw new ApiError(404, "Community not found");
+
+    // Get posts with pagination
+    const allPosts = await Post.find({
+      community: community._id,
+    })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Get total count for pagination info
+    const total = await Post.countDocuments({ community: community._id });
+    const totalPages = Math.ceil(total / limit);
+
+    res.json(new ApiResponse(200, "All posts fetched successfully", {
+      posts: allPosts,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    }));
+  });
   // ✅ TOGGLE LIKE DISLIKE
   static ToggleLikePost = AsyncHandler(async (req, res) => {
     const { postid, userid } = req.params;
@@ -256,19 +257,38 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
     );
   });
 
-  // ✅ GET A SINGLE COMMENT WITH REPLIES
+  // ✅ GET A SINGLE COMMENT WITH PAGINATED REPLIES
   static GetCommentWithReplies = AsyncHandler(async (req, res) => {
     const { commentId } = req.params;
+    const { page = 1, limit = 10 } = req.query; // Default page 1, 10 replies per page
 
-    // Use the static method from your Comment model
-    const comment = await Comment.findWithReplies(commentId);
-
+    // Find the comment
+    const comment = await Comment.findById(commentId);
     if (!comment) throw new ApiError(404, "Comment not found");
 
+    // Find replies separately with pagination
+    const replies = await Comment.find({ parentComment: commentId })
+      .sort({ createdAt: -1 }) // Newest first; adjust if you want oldest first
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    // Get total replies count (for frontend to know how many pages)
+    const totalReplies = await Comment.countDocuments({ parentComment: commentId });
+
     res.json(
-      new ApiResponse(200, "Comment fetched successfully", comment)
+      new ApiResponse(200, "Comment with replies fetched successfully", {
+        comment,
+        replies,
+        pagination: {
+          totalReplies,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(totalReplies / limit),
+        },
+      })
     );
   });
+
 
   // ✅ GET PAGINATED COMMENTS FOR A POST
   static GetPaginatedComments = AsyncHandler(async (req, res) => {
@@ -352,20 +372,20 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
   static GetTrendingPostsByCommunity = AsyncHandler(async (req, res) => {
     // Get the community ID from the request parameters or query
     const { communityid } = req.params || req.query;
-    
+
     // Get pagination parameters with defaults
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-    
+
     // Validate if communityId is provided
     if (!communityid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Community ID is required" 
+      return res.status(400).json({
+        success: false,
+        message: "Community ID is required"
       });
     }
-  
+
     // Add a match stage to filter by community
     const trendingPosts = await Post.aggregate([
       // First match posts from the specified community
@@ -404,7 +424,7 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
       { $skip: skip },
       { $limit: limit },
     ]);
-  
+
     // Get total count for pagination info
     const totalCount = await Post.aggregate([
       {
@@ -414,10 +434,10 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
       },
       { $count: "total" }
     ]);
-  
+
     const total = totalCount.length > 0 ? totalCount[0].total : 0;
     const totalPages = Math.ceil(total / limit);
-    
+
     res.status(200).json({
       success: true,
       trendingPosts,
@@ -434,10 +454,33 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
 
 
 
-  // ✅ GET TRENDING POST
+  // ✅ GET TRENDING POST WITH PAGINATION
   static GetTrendingPosts = AsyncHandler(async (req, res) => {
-    // Since we're using AsyncHandler, we don't need the try-catch block
+    const { page = 1, limit = 10 } = req.query; // Default: page 1, 10 posts per page
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
     const trendingPosts = await Post.aggregate([
+      // 1. Join with Community collection
+      {
+        $lookup: {
+          from: "communities",
+          localField: "community",
+          foreignField: "_id",
+          as: "communityDetails"
+        }
+      },
+      // 2. Unwind the joined array
+      {
+        $unwind: "$communityDetails"
+      },
+      // 3. Filter public and free communities
+      {
+        $match: {
+          "communityDetails.type": "Public",
+          "communityDetails.membershipType": "Free"
+        }
+      },
+      // 4. Calculate age in hours
       {
         $addFields: {
           ageInHours: {
@@ -445,6 +488,7 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
           },
         },
       },
+      // 5. Calculate trending score
       {
         $addFields: {
           trendingScore: {
@@ -457,19 +501,32 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
                   { $multiply: ["$shareCount", 4] },
                 ],
               },
-              {
-                $add: [1, "$ageInHours"], // Prevent division by zero
-              },
+              { $add: [1, "$ageInHours"] },
             ],
           },
         },
       },
+      // 6. Sort by trending score
       { $sort: { trendingScore: -1 } },
-      { $limit: 10 },
+      // 7. Pagination
+      { $skip: skip },
+      { $limit: parseInt(limit) },
+      // 8. Project (remove unwanted fields)
+      {
+        $project: {
+          communityDetails: 0, // hide community details if not needed
+        }
+      }
     ]);
 
-    res.status(200).json({ success: true, trendingPosts });
+    res.status(200).json({
+      success: true,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      trendingPosts
+    });
   });
+
 
   // ✅ GET PERSONALIZED TRENDING POSTS
   static GetPersonalizedTrendingPosts = AsyncHandler(async (req, res) => {
@@ -488,6 +545,14 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
     // Get user preferences (filtering out empty string if it exists)
     const userPreferences = currentUser.interests.filter((pref) => pref !== "");
 
+    // Find communities where the user has active membership
+    const userMemberships = await Membership.find({
+      userId: userId,
+      status: 'active'
+    }).select('communityId');
+
+    const userCommunityIds = userMemberships.map(membership => membership.communityId);
+
     // Find users with similar preferences - helps identify whose activity to prioritize
     const usersWithSimilarPreferences = await User.find({
       _id: { $ne: userId }, // Not the current user
@@ -498,14 +563,65 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
 
     // Get posts engaged by users with similar preferences
     const engagedPostsData = await Post.aggregate([
-      // Stage 1: Match posts that were engaged by users with similar preferences
+      // Stage 1: Join with Community collection to get community details
+      {
+        $lookup: {
+          from: "communities",
+          localField: "community",
+          foreignField: "_id",
+          as: "communityDetails"
+        }
+      },
+      // Stage 2: Unwind the community details array
+      {
+        $unwind: "$communityDetails"
+      },
+      // Stage 3: Filter posts based on community access criteria
+      {
+        $match: {
+          $or: [
+            // Public and free communities
+            {
+              "communityDetails.type": "Public",
+              "communityDetails.membershipType": "Free"
+            },
+            // Communities where user has active membership
+            {
+              "communityDetails._id": { $in: userCommunityIds }
+            }
+          ]
+        }
+      },
+      // Stage 4: Calculate interest overlap between user and community - WITH NULL HANDLING
+      {
+        $addFields: {
+          // Handle null or undefined interests with coalesce
+          communityInterests: {
+            $cond: {
+              if: { $isArray: "$communityDetails.interests" },
+              then: "$communityDetails.interests",
+              else: []
+            }
+          }
+        }
+      },
+      {
+        $addFields: {
+          interestOverlap: {
+            $size: {
+              $setIntersection: ["$communityInterests", userPreferences]
+            }
+          }
+        }
+      },
+      // Stage 5: Look up engagement data
       {
         $lookup: {
           from: "likes",
           localField: "_id",
           foreignField: "postId",
           as: "likes",
-        },
+        }
       },
       {
         $lookup: {
@@ -513,7 +629,7 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
           localField: "_id",
           foreignField: "postId",
           as: "comments",
-        },
+        }
       },
       {
         $lookup: {
@@ -521,9 +637,18 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
           localField: "_id",
           foreignField: "postId",
           as: "shares",
-        },
+        }
       },
-      // Stage 2: Add fields for calculations
+      // Stage 6: Add fields for calculations - WITH NULL HANDLING
+      {
+        $addFields: {
+          // Handle null arrays
+          likesArr: { $ifNull: ["$likes", []] },
+          commentsArr: { $ifNull: ["$comments", []] },
+          sharesArr: { $ifNull: ["$shares", []] },
+          viewsCount: { $ifNull: ["$viewsCount", 0] }
+        }
+      },
       {
         $addFields: {
           // Check if any users with similar preferences engaged with this post
@@ -532,82 +657,138 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
               {
                 $size: {
                   $filter: {
-                    input: "$likes",
+                    input: "$likesArr",
                     as: "like",
                     cond: { $in: ["$$like.userId", similarUserIds] },
-                  },
-                },
+                  }
+                }
               },
               {
                 $size: {
                   $filter: {
-                    input: "$comments",
+                    input: "$commentsArr",
                     as: "comment",
                     cond: { $in: ["$$comment.userId", similarUserIds] },
-                  },
-                },
+                  }
+                }
               },
               {
                 $size: {
                   $filter: {
-                    input: "$shares",
+                    input: "$sharesArr",
                     as: "share",
                     cond: { $in: ["$$share.userId", similarUserIds] },
-                  },
-                },
-              },
-            ],
+                  }
+                }
+              }
+            ]
           },
           // Standard engagement metrics
-          likeCount: { $size: "$likes" },
-          commentCount: { $size: "$comments" },
-          shareCount: { $size: "$shares" },
-          // Calculate age in hours
+          likeCount: { $size: "$likesArr" },
+          commentCount: { $size: "$commentsArr" },
+          shareCount: { $size: "$sharesArr" },
+          // Calculate age in hours (for time decay)
           ageInHours: {
-            $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000],
+            $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000]
           },
-        },
+          // Extract community name and other fields
+          communityName: "$communityDetails.communityName",
+          communityType: "$communityDetails.type",
+          communityMembershipType: "$communityDetails.membershipType"
+        }
       },
-      // Stage 3: Calculate trending score with preference boost
+      // Stage 7: Calculate trending score with all factors
       {
         $addFields: {
-          // Combined score including preference-based boost
+          // Combined score including all factors
           trendingScore: {
             $divide: [
               {
                 $add: [
+                  // Basic engagement metrics
                   { $multiply: ["$likeCount", 2] },
                   { $multiply: ["$commentCount", 3] },
                   { $multiply: ["$viewsCount", 1] },
                   { $multiply: ["$shareCount", 4] },
-                  // Boost for engagement by users with similar preferences (multiplier of 5)
+                  // Similar user engagement boost
                   { $multiply: ["$similarUserEngagement", 5] },
-                ],
+                  // Interest overlap boost (x3 per matching interest)
+                  { $multiply: ["$interestOverlap", 3] }
+                ]
               },
               {
-                $add: [1, "$ageInHours"], // Prevent division by zero
-              },
-            ],
-          },
-        },
+                $add: [1, "$ageInHours"] // Prevent division by zero and create time decay
+              }
+            ]
+          }
+        }
       },
-      // Stage 4: Sort by trending score
+      // Stage 8: Sort by trending score
       { $sort: { trendingScore: -1 } },
-      // Stage 5: Apply pagination
+      // Stage 9: Apply pagination
       { $skip: skip },
       { $limit: limit },
-      // Stage 6: Project to clean up response (remove temp fields we don't need)
+      // Stage 10: Project to clean up response
       {
         $project: {
-          likes: 0, // Remove the likes array
-          comments: 0, // Remove the comments array
-          shares: 0, // Remove the shares array
-        },
-      },
+          _id: 1,
+          content: 1,
+          images: 1,
+          user: 1,
+          community: 1,
+          postType: 1,
+          likeCount: 1,
+          commentCount: 1,
+          shareCount: 1,
+          viewsCount: 1,
+          createdAt: 1,
+          trendingScore: 1,
+          interestOverlap: 1,
+          communityName: 1,
+          communityType: 1,
+          communityMembershipType: 1
+        }
+      }
     ]);
 
     // Get total count for pagination info
-    const totalPosts = await Post.countDocuments();
+    const totalPostsQuery = await Post.aggregate([
+      // Join with Community collection
+      {
+        $lookup: {
+          from: "communities",
+          localField: "community",
+          foreignField: "_id",
+          as: "communityDetails"
+        }
+      },
+      // Unwind the community details array
+      {
+        $unwind: "$communityDetails"
+      },
+      // Filter based on community access criteria
+      {
+        $match: {
+          $or: [
+            // Public and free communities
+            {
+              "communityDetails.type": "Public",
+              "communityDetails.membershipType": "Free"
+            },
+            // Communities where user has active membership
+            {
+              "communityDetails._id": { $in: userCommunityIds }
+            }
+          ]
+        }
+      },
+      // Count the documents
+      {
+        $count: "total"
+      }
+    ]);
+
+    const totalPosts = totalPostsQuery.length > 0 ? totalPostsQuery[0].total : 0;
 
     res.status(200).json({
       success: true,
@@ -618,10 +799,9 @@ static GetAllPosts = AsyncHandler(async (req, res) => {
         totalPosts,
         hasNextPage: page * limit < totalPosts,
         hasPrevPage: page > 1,
-      },
+      }
     });
   });
-
   // ✅ CREATE POLLS
   static CreatePoll = AsyncHandler(async (req, res) => {
     const { id: communityId } = req.params;

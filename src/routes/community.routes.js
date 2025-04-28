@@ -45,6 +45,11 @@ CommunityRouter.route("/communities/admin/:communityId").get(
   CommunityController.getSpecificCommunityAsAdmin
 );
 
+// get suggested community for user 
+CommunityRouter.route("/communities/suggestion").get(
+  CommunityController.GetSuggestedCommunities
+);
+
 // update specific COMMUNITY details as admin
 CommunityRouter.route("/communities/admin/:communityId").put((req, res, next) => {
   // Only apply multer middleware for multipart/form-data requests

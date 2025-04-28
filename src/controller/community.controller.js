@@ -187,66 +187,66 @@ export class CommunityController {
   });
 
   // get all community of user as admin with pagination
-static getCommunitiesAsAdmin = AsyncHandler(async (req, res) => {
-  const userId = req.user._id;
-  
-  // Get pagination parameters with defaults
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  static getCommunitiesAsAdmin = AsyncHandler(async (req, res) => {
+    const userId = req.user._id;
 
-  // Get communities the user is a member of as admin
-  const memberships = await Membership.find({
-    userId,
-    role: "admin",
-  }).populate("communityId");
+    // Get pagination parameters with defaults
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-  const Communities = memberships.map((m) => m.communityId);
-  
-  // Create a query for the communities
-  const query = { _id: { $in: Communities } };
-  const projection = {
-    communityName: 1,
-    communityUsername: 1,
-    communityDescription: 1,
-    communityProfileImage: 1,
-    type: 1,
-    membershipType: 1,
-  };
+    // Get communities the user is a member of as admin
+    const memberships = await Membership.find({
+      userId,
+      role: "admin",
+    }).populate("communityId");
 
-  // Get admin communities with pagination
-  const adminsCommunities = (
-    await Community.find(query, projection)
-      .sort({ updatedAt: -1 }) // ✅ Sort at query level
-      .skip(skip)
-      .limit(limit)
-      .lean()
-  ).map(({ _id, ...rest }) => ({ communityId: _id, ...rest }));
+    const Communities = memberships.map((m) => m.communityId);
 
-  // Get total count for pagination info
-  const total = await Community.countDocuments(query);
-  const totalPages = Math.ceil(total / limit);
+    // Create a query for the communities
+    const query = { _id: { $in: Communities } };
+    const projection = {
+      communityName: 1,
+      communityUsername: 1,
+      communityDescription: 1,
+      communityProfileImage: 1,
+      type: 1,
+      membershipType: 1,
+    };
 
-  res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        "all community of user as admin",
-        {
-          communities: adminsCommunities,
-          pagination: {
-            total,
-            page,
-            limit,
-            totalPages,
-            hasNextPage: page < totalPages,
-            hasPrevPage: page > 1
+    // Get admin communities with pagination
+    const adminsCommunities = (
+      await Community.find(query, projection)
+        .sort({ updatedAt: -1 }) // ✅ Sort at query level
+        .skip(skip)
+        .limit(limit)
+        .lean()
+    ).map(({ _id, ...rest }) => ({ communityId: _id, ...rest }));
+
+    // Get total count for pagination info
+    const total = await Community.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          "all community of user as admin",
+          {
+            communities: adminsCommunities,
+            pagination: {
+              total,
+              page,
+              limit,
+              totalPages,
+              hasNextPage: page < totalPages,
+              hasPrevPage: page > 1
+            }
           }
-        }
-      )
-    );
-});
+        )
+      );
+  });
 
   // Community settings
 
@@ -403,6 +403,210 @@ static getCommunitiesAsAdmin = AsyncHandler(async (req, res) => {
         new ApiResponse(200, "Community deleted successfully", { communityId })
       );
   });
+
+  // ✅ GET SUGGESTED COMMUNITIES FOR USER
+  static GetSuggestedCommunities = AsyncHandler(async (req, res) => {
+    const userId = req.user._id; // Authenticated user ID
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get current user preferences
+    const currentUser = await User.findById(userId);
+    if (!currentUser) {
+      res.status(404);
+      throw new Error("User not found");
+    }
+
+    // Get user preferences (filtering out empty strings)
+    const userPreferences = currentUser.interests.filter(pref => pref !== "");
+
+    // Find communities where the user is already a member
+    const userMemberships = await Membership.find({
+      userId: userId
+    }).select('communityId');
+
+    const userCommunityIds = userMemberships.map(membership =>
+      mongoose.Types.ObjectId.isValid(membership.communityId)
+        ? new mongoose.Types.ObjectId(membership.communityId)
+        : membership.communityId
+    );
+
+    // Aggregate to find and rank suggested communities
+    const suggestedCommunities = await Community.aggregate([
+      // Stage 1: Filter out communities user is already a member of
+      {
+        $match: {
+          _id: { $nin: userCommunityIds }
+        }
+      },
+      // Stage 2: Calculate interest overlap
+      {
+        $addFields: {
+          communityInterests: {
+            $cond: {
+              if: { $isArray: "$interests" },
+              then: "$interests",
+              else: []
+            }
+          }
+        }
+      },
+      {
+        $addFields: {
+          interestOverlap: {
+            $size: {
+              $setIntersection: ["$communityInterests", userPreferences]
+            }
+          }
+        }
+      },
+      // Stage 3: Lookup community engagement metrics
+      {
+        $lookup: {
+          from: "posts",
+          localField: "_id",
+          foreignField: "community",
+          as: "posts"
+        }
+      },
+      {
+        $lookup: {
+          from: "memberships",
+          localField: "_id",
+          foreignField: "communityId",
+          as: "members"
+        }
+      },
+      // Stage 4: Calculate engagement metrics
+      {
+        $addFields: {
+          // Basic metrics
+          postCount: { $size: "$posts" },
+          memberCount: { $size: "$members" },
+
+          // Activity metrics - last 30 days
+          recentPosts: {
+            $size: {
+              $filter: {
+                input: "$posts",
+                as: "post",
+                cond: {
+                  $gt: ["$$post.createdAt", { $subtract: ["$$NOW", 1000 * 60 * 60 * 24 * 30] }] // Posts in last 30 days
+                }
+              }
+            }
+          },
+
+          // Calculate average engagement per post
+          totalLikes: { $sum: "$posts.likeCount" },
+          totalComments: { $sum: "$posts.commentCount" },
+          totalShares: { $sum: "$posts.shareCount" },
+          totalViews: { $sum: "$posts.viewsCount" }
+        }
+      },
+      // Stage 5: Calculate engagement scores
+      {
+        $addFields: {
+          // Prevent division by zero when calculating per-post metrics
+          postsNonZero: { $cond: [{ $eq: ["$postCount", 0] }, 1, "$postCount"] },
+
+          // Average engagement per post
+          avgEngagementPerPost: {
+            $divide: [
+              { $add: ["$totalLikes", "$totalComments", "$totalShares", "$totalViews"] },
+              { $cond: [{ $eq: ["$postCount", 0] }, 1, "$postCount"] } // Handle zero posts
+            ]
+          },
+
+          // Activity level based on recent posts and member count
+          activityLevel: {
+            $add: [
+              "$recentPosts",
+              { $divide: ["$memberCount", 10] } // Weight members less than posts
+            ]
+          }
+        }
+      },
+      // Stage 6: Calculate overall relevance score
+      {
+        $addFields: {
+          relevanceScore: {
+            $add: [
+              // Interest overlap (most important - x5)
+              { $multiply: ["$interestOverlap", 5] },
+
+              // Engagement factors
+              { $multiply: ["$avgEngagementPerPost", 0.5] },
+              { $multiply: ["$activityLevel", 1] },
+
+              // Slight boost for public communities
+              { $cond: [{ $eq: ["$type", "Public"] }, 2, 0] },
+
+              // Slight boost for free communities
+              { $cond: [{ $eq: ["$membershipType", "Free"] }, 2, 0] }
+            ]
+          }
+        }
+      },
+      // Stage 7: Sort by relevance score
+      { $sort: { relevanceScore: -1 } },
+      // Stage 8: Apply pagination
+      { $skip: skip },
+      { $limit: limit },
+      // Stage 9: Clean up response
+      {
+        $project: {
+          _id: 1,
+          communityName: 1,
+          communityUsername: 1,
+          communityDescription: 1,
+          communityProfileImage: 1,
+          communityCoverImages: 1,
+          type: 1,
+          membershipType: 1,
+          interests: "$communityInterests",
+          interestOverlap: 1,
+          memberCount: 1,
+          postCount: 1,
+          recentPosts: 1,
+          relevanceScore: 1,
+          avgEngagementPerPost: 1,
+          activityLevel: 1
+        }
+      }
+    ]);
+
+    // Get total count for pagination info
+    const totalCommunitiesQuery = await Community.aggregate([
+      // Filter out communities user is already a member of
+      {
+        $match: {
+          _id: { $nin: userCommunityIds }
+        }
+      },
+      // Count remaining communities
+      {
+        $count: "total"
+      }
+    ]);
+
+    const totalCommunities = totalCommunitiesQuery.length > 0 ? totalCommunitiesQuery[0].total : 0;
+
+    res.status(200).json({
+      success: true,
+      suggestedCommunities,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalCommunities / limit),
+        totalCommunities,
+        hasNextPage: page * limit < totalCommunities,
+        hasPrevPage: page > 1,
+      }
+    });
+  });
+
+
 
   // COMMUNITY STATS
   static GetCommunityStats = AsyncHandler(async (req, res) => {
