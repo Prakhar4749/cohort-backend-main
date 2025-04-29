@@ -153,6 +153,7 @@ export const login = AsyncHandler(async (req, res) => {
     throw new ApiError(400, "Email and password are required");
   }
 
+  // Find user by email and include password field (since it's normally excluded)
   const user = await User.findOne({ email }).select("+password");
   if (!user) {
     throw new ApiError(404, "User not found");
@@ -165,17 +166,25 @@ export const login = AsyncHandler(async (req, res) => {
     );
   }
 
+  // Check if password matches
   const isMatch = await user.comparePassword(password);
   if (!isMatch) {
     throw new ApiError(401, "Invalid credentials");
   }
 
+  // Create JWT
   const token = jwt.sign({ id: user._id }, appEnvConfigs.JWT_SECRET, {
     expiresIn: "7d",
   });
 
+  // Remove password before sending response
+  user.password = undefined;
+
+  // Set Authorization header
   res.setHeader("Authorization", `Bearer ${token}`);
-  return successResponse(res, { ...user.toJSON(), token}, "Login successful");
+
+  // Send clean user data
+  return successResponse(res, user.toJSON(), "Login successful");
 });
 
 // export const login = async (req, res) => {
