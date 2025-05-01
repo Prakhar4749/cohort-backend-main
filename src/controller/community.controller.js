@@ -4,8 +4,8 @@ import Community from "../models/community/community.model.js";
 import User from "../models/users/user.model.js";
 import Post from "../models/post/post.model.js";
 import CommunityPaymentMethod from "../models/community/community.payment.method.model.js";
-import { Membership } from "../models/community/membership.model.js";
-import { communityPermissions } from "../models/community/community.permission.model.js";
+import Membership from "../models/community/membership.model.js";
+import CommunityPermissions from "../models/community/community.permission.model.js";
 import mongoose from "mongoose";
 import { communityTransaction } from "../models/community/comunity.transaction.model.js";
 
@@ -70,80 +70,315 @@ export class CommunityController {
 
   // ✅ CREATE COMMUNITY
   static CreateCommunity = AsyncHandler(async (req, res) => {
+    // Extract and validate required fields
     const {
       communityName,
       communityDescription,
-      communityEmail,
-      communityUsername,
-      type,
+      communityType,
       membershipType,
       socialAccounts,
+      interests,
+      location,
+      canPost,
+      canChat,
     } = req.body;
 
-    // Validate required fields
-    if (
-      !communityName?.trim() ||
-      !communityDescription?.trim() ||
-      !communityUsername?.trim()
-    ) {
-      throw new ApiError(400, "Please provide valid fields.");
+    // Check if all required fields are present
+    const requiredFields = [
+      "communityName",
+      "communityDescription",
+      "communityType",
+      "membershipType",
+      "socialAccounts",
+      "interests",
+      "location",
+      "canPost",
+      "canChat",
+    ];
+
+    const missingFields = requiredFields.filter(
+      (field) => !(field in req.body)
+    );
+
+    if (missingFields.length > 0) {
+      throw new ApiError(
+        400,
+        `Missing required fields: ${missingFields.join(", ")}`
+      );
     }
 
-    // Handle File Uploads
-    const uploadedFiles = await this.#handleFileUploads(req.files);
+    // Validate required fields
+    if (!communityName?.trim()) {
+      throw new ApiError(400, "Community name is required");
+    }
 
-    // Create new community
-    const newCommunity = await Community.create({
-      communityName: communityName.trim(),
-      communityUsername: communityUsername.trim(),
-      communityDescription: communityDescription.trim(),
-      communityEmail: communityEmail.trim(),
-      communityJoinUrl: `https://example.com/${communityUsername.replace(/\s+/g, "-")}`,
-      type: type || "Public",
-      membershipType: membershipType || "Free",
-      communityProfileImage: uploadedFiles.profilePhoto || null,
-      communityCoverImages: uploadedFiles.coverPhoto || [],
-      socialAccounts: {
-        instagram: socialAccounts?.instagram || "",
-        website: socialAccounts?.website || "",
-        googleMeet: socialAccounts?.googleMeet || "",
-        msTeams: socialAccounts?.msTeams || "",
-        facebook: socialAccounts?.facebook || "",
-        twitter: socialAccounts?.twitter || "",
-        linkedin: socialAccounts?.linkedin || "",
-      },
-      owner: req.user._id,
-    });
+    if (!communityDescription?.trim()) {
+      throw new ApiError(400, "Community description is required");
+    }
 
-    // Create permission
-    const permissions = new communityPermissions({
-      community: newCommunity._id,
-    });
+    if (communityDescription.length > 1000) {
+      throw new ApiError(400, "Description cannot exceed 1000 characters");
+    }
 
-    await permissions.save();
+    const isValidBooleanInput = (value) =>
+      value === "true" || value === "false" || typeof value === "boolean";
 
-    // Update the community with references
-    await mongoose.model("Community").findByIdAndUpdate(newCommunity._id, {
-      $set: {
-        "settings.permissions": permissions._id,
-      },
-    });
-
-    // Create membership
-    const membership = await Membership.create({
-      userId: req.user._id,
-      communityId: newCommunity._id,
-      role: "admin",
-    });
-
-    res
-      .status(201)
-      .json(
-        new ApiResponse(201, "Community created successfully", newCommunity)
+    if (!isValidBooleanInput(canPost) || !isValidBooleanInput(canChat)) {
+      throw new ApiError(
+        400,
+        "canPost and canChat must be boolean values (true or false)"
       );
+    }
+
+    const parsedCanPost = canPost === "true" || canPost === true;
+    const parsedCanChat = canChat === "true" || canChat === true;
+
+    // Normalize and validate interests
+    let formattedInterests = [];
+
+    if (typeof interests === "string") {
+      // Single interest submitted as a string
+      formattedInterests = [interests];
+    } else if (Array.isArray(interests)) {
+      // Multiple interests
+      formattedInterests = interests;
+    } else {
+      throw new ApiError(400, "Interests must be a non-empty array of strings");
+    }
+
+    // Filter out empty strings, trim, and deduplicate
+    formattedInterests = [
+      ...new Set(formattedInterests.map((i) => i.trim()).filter(Boolean)),
+    ];
+
+    if (formattedInterests.length === 0) {
+      throw new ApiError(400, "At least one interest is required");
+    }
+
+    if (formattedInterests.length > 20) {
+      throw new ApiError(400, "Maximum 20 interests allowed");
+    }
+
+    if (!formattedInterests.every((i) => i.length >= 1 && i.length <= 30)) {
+      throw new ApiError(
+        400,
+        "Each interest must be between 1 and 30 characters long"
+      );
+    }
+
+    // Start a MongoDB transaction session
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Handle file uploads
+      const uploadedFiles = await this.#handleFileUploads(req.files);
+
+      // Generate unique username from name
+      const communityUsername =
+        await Community.generateCommunityUsername(communityName);
+
+      // Prepare community data
+      const communityData = {
+        communityName: communityName.trim(),
+        communityUsername: communityUsername,
+        communityDescription: communityDescription.trim(),
+        communityType: communityType.toLowerCase(),
+        membershipType: membershipType.toLowerCase(),
+        interests: formattedInterests,
+        owner: req.user._id,
+        media: {
+          profileImage: uploadedFiles.profilePhoto || "",
+          coverImages: uploadedFiles.coverPhoto || [],
+        },
+      };
+
+      // Add location if provided
+      if (location?.countryCode) {
+        communityData.location = {
+          countryCode: location.countryCode.toUpperCase(),
+          regionCode: location.regionCode
+            ? location.regionCode.toUpperCase()
+            : "",
+          formattedAddress: location.formattedAddress || "",
+        };
+
+        if (
+          location.coordinates &&
+          Array.isArray(location.coordinates) &&
+          location.coordinates.length === 2
+        ) {
+          communityData.location.coordinates = location.coordinates;
+        }
+      }
+
+      // Add social accounts if provided
+      if (socialAccounts) {
+        communityData.socialAccounts = {
+          instagram: socialAccounts.instagram || "",
+          website: socialAccounts.website || "",
+          googleMeet: socialAccounts.googleMeet || "",
+          msTeams: socialAccounts.msTeams || "",
+          facebook: socialAccounts.facebook || "",
+          twitter: socialAccounts.twitter || "",
+          linkedin: socialAccounts.linkedin || "",
+        };
+      }
+
+      // Create the community (within the transaction)
+      const newCommunity = await Community.create([communityData], { session });
+      const community = newCommunity[0]; // Get the created community from the array
+
+      // Create community permissions (within the transaction)
+      const permissionsData = {
+        community: community._id,
+        member: {
+          canPost: parsedCanPost, // From UI toggle
+          canChat: parsedCanChat, // From UI toggle
+          canAddMember: false, // Default
+        },
+        email: {
+          emailAlerts: false,
+          messagesAlert: false,
+          pushNotify: false,
+        },
+        chat: {
+          onlineStatus: false,
+          soundNotification: false,
+        },
+      };
+
+      // Create permissions document (within the transaction)
+      const permissionsArray = await CommunityPermissions.create([permissionsData], { session });
+      const permissions = permissionsArray[0];
+
+      // Link permissions to community (within the transaction)
+      await Community.findByIdAndUpdate(
+        community._id,
+        { permissions: permissions._id },
+        { session }
+      );
+
+      // Create admin membership for the creator (within the transaction)
+      await Membership.create(
+        [
+          {
+            userId: req.user._id,
+            communityId: community._id,
+            role: "admin",
+            status: "active",
+            joinedAt: new Date(),
+            activityStats: {
+              lastActive: new Date(),
+            },
+            // Add a note that this is the founding member
+            adminNotes: "Founding member and creator of the community",
+          },
+        ],
+        { session }
+      );
+
+      // Commit the transaction
+      await session.commitTransaction();
+
+      // Return success response
+      return new ApiResponse(
+        201,
+        "Community created successfully",
+        community
+      ).send(res);
+    } catch (error) {
+      // If anything fails, abort the transaction
+      await session.abortTransaction();
+      throw error; // Let the error handler middleware catch this
+    } finally {
+      // End the session
+      session.endSession();
+    }
   });
+  // static CreateCommunity = AsyncHandler(async (req, res) => {
+  //   const {
+  //     communityName,
+  //     communityDescription,
+  //     // communityEmail,
+  //     communityUsername,
+  //     type,
+  //     membershipType,
+  //     socialAccounts,
+  //     interests,
+  //   } = req.body;
+
+  //   // Validate required fields
+  //   if (
+  //     !communityName?.trim() ||
+  //     !communityDescription?.trim() ||
+  //     !communityUsername?.trim() ||
+  //     !interests
+  //   ) {
+  //     throw new ApiError(400, "Please provide valid fields.");
+  //   }
+
+  //   if (!Array.isArray(interests) || interests.length === 0) {
+  //     throw new ApiError(400, "Interests must be a non-empty array");
+  //   }
+
+  //   // Handle File Uploads
+  //   const uploadedFiles = await this.#handleFileUploads(req.files);
+
+  //   // Create new community
+  //   const newCommunity = await Community.create({
+  //     communityName: communityName.trim(),
+  //     communityUsername: communityUsername.trim(),
+  //     communityDescription: communityDescription.trim(),
+  //     // communityEmail: communityEmail.trim(),
+  //     communityJoinUrl: `https://example.com/${communityUsername.replace(/\s+/g, "-")}`,
+  //     type: type || "Public",
+  //     membershipType: membershipType || "Free",
+  //     communityProfileImage: uploadedFiles.profilePhoto || null,
+  //     communityCoverImages: uploadedFiles.coverPhoto || [],
+  //     socialAccounts: {
+  //       instagram: socialAccounts?.instagram || "",
+  //       website: socialAccounts?.website || "",
+  //       googleMeet: socialAccounts?.googleMeet || "",
+  //       msTeams: socialAccounts?.msTeams || "",
+  //       facebook: socialAccounts?.facebook || "",
+  //       twitter: socialAccounts?.twitter || "",
+  //       linkedin: socialAccounts?.linkedin || "",
+  //     },
+  //     owner: req.user._id,
+  //     interests: interests,
+  //   });
+
+  //   // Create permission
+  //   const permissions = new CommunityPermissions({
+  //     community: newCommunity._id,
+  //   });
+
+  //   await permissions.save();
+
+  //   // Update the community with references
+  //   await mongoose.model("Community").findByIdAndUpdate(newCommunity._id, {
+  //     $set: {
+  //       "settings.permissions": permissions._id,
+  //     },
+  //   });
+
+  //   // Create membership
+  //   const membership = await Membership.create({
+  //     userId: req.user._id,
+  //     communityId: newCommunity._id,
+  //     role: "admin",
+  //   });
+
+  //   res
+  //     .status(201)
+  //     .json(
+  //       new ApiResponse(201, "Community created successfully", newCommunity)
+  //     );
+  // });
 
   // ✅ JOIN COMMUNITY
+
   static JoinCommunity = AsyncHandler(async (req, res) => {
     const communityId = req.params.communityId;
 
@@ -227,25 +462,19 @@ export class CommunityController {
     const total = await Community.countDocuments(query);
     const totalPages = Math.ceil(total / limit);
 
-    res
-      .status(200)
-      .json(
-        new ApiResponse(
-          200,
-          "all community of user as admin",
-          {
-            communities: adminsCommunities,
-            pagination: {
-              total,
-              page,
-              limit,
-              totalPages,
-              hasNextPage: page < totalPages,
-              hasPrevPage: page > 1
-            }
-          }
-        )
-      );
+    res.status(200).json(
+      new ApiResponse(200, "all community of user as admin", {
+        communities: adminsCommunities,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+        },
+      })
+    );
   });
 
   // Community settings
@@ -419,14 +648,14 @@ export class CommunityController {
     }
 
     // Get user preferences (filtering out empty strings)
-    const userPreferences = currentUser.interests.filter(pref => pref !== "");
+    const userPreferences = currentUser.interests.filter((pref) => pref !== "");
 
     // Find communities where the user is already a member
     const userMemberships = await Membership.find({
-      userId: userId
-    }).select('communityId');
+      userId: userId,
+    }).select("communityId");
 
-    const userCommunityIds = userMemberships.map(membership =>
+    const userCommunityIds = userMemberships.map((membership) =>
       mongoose.Types.ObjectId.isValid(membership.communityId)
         ? new mongoose.Types.ObjectId(membership.communityId)
         : membership.communityId
@@ -437,8 +666,8 @@ export class CommunityController {
       // Stage 1: Filter out communities user is already a member of
       {
         $match: {
-          _id: { $nin: userCommunityIds }
-        }
+          _id: { $nin: userCommunityIds },
+        },
       },
       // Stage 2: Calculate interest overlap
       {
@@ -447,19 +676,19 @@ export class CommunityController {
             $cond: {
               if: { $isArray: "$interests" },
               then: "$interests",
-              else: []
-            }
-          }
-        }
+              else: [],
+            },
+          },
+        },
       },
       {
         $addFields: {
           interestOverlap: {
             $size: {
-              $setIntersection: ["$communityInterests", userPreferences]
-            }
-          }
-        }
+              $setIntersection: ["$communityInterests", userPreferences],
+            },
+          },
+        },
       },
       // Stage 3: Lookup community engagement metrics
       {
@@ -467,16 +696,16 @@ export class CommunityController {
           from: "posts",
           localField: "_id",
           foreignField: "community",
-          as: "posts"
-        }
+          as: "posts",
+        },
       },
       {
         $lookup: {
           from: "memberships",
           localField: "_id",
           foreignField: "communityId",
-          as: "members"
-        }
+          as: "members",
+        },
       },
       // Stage 4: Calculate engagement metrics
       {
@@ -492,41 +721,53 @@ export class CommunityController {
                 input: "$posts",
                 as: "post",
                 cond: {
-                  $gt: ["$$post.createdAt", { $subtract: ["$$NOW", 1000 * 60 * 60 * 24 * 30] }] // Posts in last 30 days
-                }
-              }
-            }
+                  $gt: [
+                    "$$post.createdAt",
+                    { $subtract: ["$$NOW", 1000 * 60 * 60 * 24 * 30] },
+                  ], // Posts in last 30 days
+                },
+              },
+            },
           },
 
           // Calculate average engagement per post
           totalLikes: { $sum: "$posts.likeCount" },
           totalComments: { $sum: "$posts.commentCount" },
           totalShares: { $sum: "$posts.shareCount" },
-          totalViews: { $sum: "$posts.viewsCount" }
-        }
+          totalViews: { $sum: "$posts.viewsCount" },
+        },
       },
       // Stage 5: Calculate engagement scores
       {
         $addFields: {
           // Prevent division by zero when calculating per-post metrics
-          postsNonZero: { $cond: [{ $eq: ["$postCount", 0] }, 1, "$postCount"] },
+          postsNonZero: {
+            $cond: [{ $eq: ["$postCount", 0] }, 1, "$postCount"],
+          },
 
           // Average engagement per post
           avgEngagementPerPost: {
             $divide: [
-              { $add: ["$totalLikes", "$totalComments", "$totalShares", "$totalViews"] },
-              { $cond: [{ $eq: ["$postCount", 0] }, 1, "$postCount"] } // Handle zero posts
-            ]
+              {
+                $add: [
+                  "$totalLikes",
+                  "$totalComments",
+                  "$totalShares",
+                  "$totalViews",
+                ],
+              },
+              { $cond: [{ $eq: ["$postCount", 0] }, 1, "$postCount"] }, // Handle zero posts
+            ],
           },
 
           // Activity level based on recent posts and member count
           activityLevel: {
             $add: [
               "$recentPosts",
-              { $divide: ["$memberCount", 10] } // Weight members less than posts
-            ]
-          }
-        }
+              { $divide: ["$memberCount", 10] }, // Weight members less than posts
+            ],
+          },
+        },
       },
       // Stage 6: Calculate overall relevance score
       {
@@ -544,10 +785,10 @@ export class CommunityController {
               { $cond: [{ $eq: ["$type", "Public"] }, 2, 0] },
 
               // Slight boost for free communities
-              { $cond: [{ $eq: ["$membershipType", "Free"] }, 2, 0] }
-            ]
-          }
-        }
+              { $cond: [{ $eq: ["$membershipType", "Free"] }, 2, 0] },
+            ],
+          },
+        },
       },
       // Stage 7: Sort by relevance score
       { $sort: { relevanceScore: -1 } },
@@ -572,9 +813,9 @@ export class CommunityController {
           recentPosts: 1,
           relevanceScore: 1,
           avgEngagementPerPost: 1,
-          activityLevel: 1
-        }
-      }
+          activityLevel: 1,
+        },
+      },
     ]);
 
     // Get total count for pagination info
@@ -582,16 +823,17 @@ export class CommunityController {
       // Filter out communities user is already a member of
       {
         $match: {
-          _id: { $nin: userCommunityIds }
-        }
+          _id: { $nin: userCommunityIds },
+        },
       },
       // Count remaining communities
       {
-        $count: "total"
-      }
+        $count: "total",
+      },
     ]);
 
-    const totalCommunities = totalCommunitiesQuery.length > 0 ? totalCommunitiesQuery[0].total : 0;
+    const totalCommunities =
+      totalCommunitiesQuery.length > 0 ? totalCommunitiesQuery[0].total : 0;
 
     res.status(200).json({
       success: true,
@@ -602,11 +844,9 @@ export class CommunityController {
         totalCommunities,
         hasNextPage: page * limit < totalCommunities,
         hasPrevPage: page > 1,
-      }
+      },
     });
   });
-
-
 
   // COMMUNITY STATS
   static GetCommunityStats = AsyncHandler(async (req, res) => {
@@ -1115,7 +1355,7 @@ export class CommunityController {
     const userId = req.user._id;
 
     // Find community permissions by user ID
-    const CommunityPermissions = await communityPermissions.findOne(
+    const CommunityPermissions = await CommunityPermissions.findOne(
       { community: communityId } // Find by community ID field
     );
 
@@ -1158,7 +1398,7 @@ export class CommunityController {
     // For example: if (req.body.removeField) unsetData['fieldName'] = 1;
 
     // Find user permissions by user ID and update
-    const updateUserPermission = await communityPermissions.findOneAndUpdate(
+    const updateUserPermission = await CommunityPermissions.findOneAndUpdate(
       { community: communityId }, // Find by community ID field
       {
         $set: updateData,
