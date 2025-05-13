@@ -1,4 +1,9 @@
-import { ApiError, ApiResponse, AsyncHandler } from "../utils/responseUtils.js";
+import {
+  ApiError,
+  ApiResponse,
+  AsyncHandler,
+  successResponse,
+} from "../utils/responseUtils.js";
 import { GetImageUrlFromCloudinary } from "../libs/cloudinary/cloudinaryUploader.js";
 import Post from "../models/post/post.model.js";
 import Comment from "../models/post/comment.model.js";
@@ -10,7 +15,7 @@ import User from "../models/users/user.model.js";
 import { appEnvConfigs } from "../configs/env_config.js";
 import pollSchema from "../schema/pollSchema.js";
 import mongoose from "mongoose";
-import { Membership } from "../models/community/membership.model.js";
+import Membership from "../models/community/membership.model.js";
 
 export class PostController {
   // 🔒 Private method to find a post by ID
@@ -31,55 +36,221 @@ export class PostController {
   // static UserId = "67a6d128a0a744491e097cf6";
 
   // ✅ CREATE POST
+  // static CreatePost = AsyncHandler(async (req, res) => {
+  //   // Fix for content handling
+  //   let content;
+  //   if (typeof req.body.content === "object") {
+  //     content = req.body.content.content;
+  //   } else {
+  //     content = req.body.content;
+  //   }
+
+  //   if (!content) throw new ApiError(401, "Please provide valid content");
+
+  //   const { userid: userId, communityid: communityId } = req.params;
+
+  //   // Find user and community
+  //   const [community, user] = await Promise.all([
+  //     communityId ? PostController.#findCommunity(communityId) : null,
+  //     PostController.#findUserById(userId),
+  //   ]);
+
+  //   if (communityId && !community)
+  //     throw new ApiError(404, "Community not found");
+
+  //   if (!user) throw new ApiError(404, "User not found");
+
+  //   // Process files
+  //   const postImgs = req.files ? req.files.map((file) => file.path) : [];
+  //   if (postImgs.length > 3)
+  //     throw new ApiError(400, "You can upload a maximum of 3 images.");
+
+  //   const images =
+  //     postImgs.length > 0 ? await GetImageUrlFromCloudinary(postImgs) : [];
+
+  //   // Create post
+  //   const newPost = await Post.create({
+  //     content,
+  //     images,
+  //     user: userId,
+  //     community: communityId,
+  //   });
+
+  //   // Only update community if it exists
+  //   if (community && community.communityPosts) {
+  //     community.communityPosts.push(newPost._id);
+  //     await community.save();
+  //   }
+
+  //   res
+  //     .status(201)
+  //     .json(new ApiResponse(201, "Post created successfully", newPost));
+  // });
   static CreatePost = AsyncHandler(async (req, res) => {
-    // Fix for content handling
-    let content;
-    if (typeof req.body.content === "object") {
-      content = req.body.content.content;
-    } else {
-      content = req.body.content;
+    const user = req.user;
+    const { communityid: communityId } = req.params;
+
+    // Extract and validate content
+    const { contentText, postType = "text", visibility = "public" } = req.body;
+
+    // Validate required fields
+    if (
+      !contentText ||
+      typeof contentText !== "string" ||
+      contentText.trim().length < 15
+    ) {
+      throw new ApiError(
+        400,
+        "ContentText is required and must be at least 15 characters long"
+      );
     }
 
-    if (!content) throw new ApiError(401, "Please provide valid content");
+    // Validate postType against allowed values
+    const validPostTypes = ["text", "poll", "event", "media"];
+    if (!validPostTypes.includes(postType)) {
+      throw new ApiError(
+        400,
+        `Invalid postType. Must be one of: ${validPostTypes.join(", ")}`
+      );
+    }
 
-    const { userid: userId, communityid: communityId } = req.params;
-
-    // Find user and community
-    const [community, user] = await Promise.all([
-      communityId ? PostController.#findCommunity(communityId) : null,
-      PostController.#findUserById(userId),
-    ]);
-
-    if (communityId && !community)
+    // Check if community exists
+    const community = await PostController.#findCommunity(communityId);
+    if (!community) {
       throw new ApiError(404, "Community not found");
-
-    if (!user) throw new ApiError(404, "User not found");
-
-    // Process files
-    const postImgs = req.files ? req.files.map((file) => file.path) : [];
-    if (postImgs.length > 3)
-      throw new ApiError(400, "You can upload a maximum of 3 images.");
-
-    const images =
-      postImgs.length > 0 ? await GetImageUrlFromCloudinary(postImgs) : [];
-
-    // Create post
-    const newPost = await Post.create({
-      content,
-      images,
-      user: userId,
-      community: communityId,
-    });
-
-    // Only update community if it exists
-    if (community && community.communityPosts) {
-      community.communityPosts.push(newPost._id);
-      await community.save();
     }
 
-    res
-      .status(201)
-      .json(new ApiResponse(201, "Post created successfully", newPost));
+    // Prepare post data according to our schema structure
+    const basePostData = {
+      userId: user.id,
+      communityId: communityId,
+      postType: postType,
+      visibility: visibility,
+      contentText: contentText, // Initialize empty content object
+      status: "active",
+    };
+
+    // Set content based on postType
+    if (postType === "media") {
+      const { captions } = req.body;
+
+      if (!captions || typeof captions !== "string") {
+        throw new ApiError(400, "Captions are required for media posts");
+      }
+
+      if (captions.trim().length > 1000) {
+        throw new ApiError(
+          400,
+          "Captions must not be more than 1000 characters"
+        );
+      }
+
+      // Process files if any
+      const filesArray = Array.isArray(req.files)
+        ? req.files
+        : req.files
+          ? [req.files]
+          : [];
+
+      if (filesArray.length < 1 || filesArray.length > 10) {
+        throw new ApiError(
+          400,
+          "Media post must have between 1 and 10 media items"
+        );
+      }
+
+      // Process image URLs only if files are provided
+      const mediaUrls =
+        filesArray.length > 0
+          ? await GetImageUrlFromCloudinary(filesArray, "posts")
+          : [];
+
+      // For media posts, use the mediaPostSchema structure
+      basePostData.mediaUrls = mediaUrls;
+      basePostData.captions = captions.trim();
+    } else if (postType === "poll") {
+      // For poll posts, extract poll-specific data
+      const { options, expiresAt } = req.body;
+
+      if (!options || !Array.isArray(options) || options.length < 2) {
+        throw new ApiError(400, "Poll must have at least 2 options");
+      }
+      const isValidOptions = options.every((option) => option.length <= 100);
+      if (!isValidOptions) {
+        throw new ApiError(
+          400,
+          "Each poll option must be 100 characters or less"
+        );
+      }
+
+      if (!expiresAt) {
+        throw new ApiError(400, "Poll must have an expiration date");
+      }
+
+      basePostData.question = contentText.trim();
+      basePostData.options = options;
+      basePostData.expiresAt = new Date(expiresAt);
+    } else if (postType === "event") {
+      // For event posts, extract event-specific data
+      const { eventDate, location } = req.body;
+
+      if (!eventDate) {
+        throw new ApiError(400, "Event must have a date");
+      }
+      if (!location || location.trim().length < 10) {
+        throw new ApiError(400, "Event must have location");
+      }
+      if (contentText.trim().length > 200) {
+        throw new ApiError(
+          400,
+          "Event Title can't be more than 200 characters"
+        );
+      }
+
+      basePostData.eventTitle = contentText.trim();
+      basePostData.eventDate = new Date(eventDate);
+      basePostData.location = location;
+    }
+
+    try {
+      // Use the static method from our schema to create the appropriate post type
+      const newPost = await Post.createPost(basePostData);
+
+      // Update community's posts array using findByIdAndUpdate for better performance
+      // This avoids having to fetch the entire community document
+      if (community) {
+        await Community.findByIdAndUpdate(
+          communityId,
+          { $push: { communityPosts: newPost._id } },
+          { new: true }
+        );
+      }
+
+      // Update user's activity stats in their membership
+      await Membership.findOneAndUpdate(
+        { userId: user.id, communityId: communityId },
+        {
+          $inc: { "activityStats.postCount": 1 },
+          $set: { "activityStats.lastActive": new Date() },
+        }
+      );
+
+      // Return a successful response with post data
+      return successResponse(
+        res,
+        newPost.toJSON(),
+        "Post created successfully",
+        201
+      );
+    } catch (error) {
+      // Handle specific errors
+      if (error.name === "ValidationError") {
+        throw new ApiError(400, `Validation error: ${error.message}`);
+      }
+
+      // Re-throw other errors
+      throw error;
+    }
   });
 
   // ✅ GET ALL POSTS of community with pagination
@@ -106,18 +277,21 @@ export class PostController {
     const total = await Post.countDocuments({ community: community._id });
     const totalPages = Math.ceil(total / limit);
 
-    res.json(new ApiResponse(200, "All posts fetched successfully", {
-      posts: allPosts,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1
-      }
-    }));
+    res.json(
+      new ApiResponse(200, "All posts fetched successfully", {
+        posts: allPosts,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+        },
+      })
+    );
   });
+
   // ✅ TOGGLE LIKE DISLIKE
   static ToggleLikePost = AsyncHandler(async (req, res) => {
     const { postid, userid } = req.params;
@@ -273,7 +447,9 @@ export class PostController {
       .limit(parseInt(limit));
 
     // Get total replies count (for frontend to know how many pages)
-    const totalReplies = await Comment.countDocuments({ parentComment: commentId });
+    const totalReplies = await Comment.countDocuments({
+      parentComment: commentId,
+    });
 
     res.json(
       new ApiResponse(200, "Comment with replies fetched successfully", {
@@ -288,7 +464,6 @@ export class PostController {
       })
     );
   });
-
 
   // ✅ GET PAGINATED COMMENTS FOR A POST
   static GetPaginatedComments = AsyncHandler(async (req, res) => {
@@ -306,7 +481,7 @@ export class PostController {
     // Query for top-level comments only
     const query = {
       post: postId,
-      parentComment: null
+      parentComment: null,
     };
 
     // Get total count for pagination
@@ -323,8 +498,8 @@ export class PostController {
         options: { sort: { createdAt: 1 } },
         populate: {
           path: "user",
-          select: "username profileImage"
-        }
+          select: "username profileImage",
+        },
       });
 
     res.json(
@@ -335,8 +510,8 @@ export class PostController {
           totalPages: Math.ceil(totalComments / limitNum),
           currentPage: pageNum,
           hasNextPage: pageNum < Math.ceil(totalComments / limitNum),
-          hasPrevPage: pageNum > 1
-        }
+          hasPrevPage: pageNum > 1,
+        },
       })
     );
   });
@@ -368,7 +543,7 @@ export class PostController {
       .json(new ApiResponse(201, "Post shared successfully", postLinks));
   });
 
-  // ✅ Get trending for a perticular community 
+  // ✅ Get trending for a perticular community
   static GetTrendingPostsByCommunity = AsyncHandler(async (req, res) => {
     // Get the community ID from the request parameters or query
     const { communityid } = req.params || req.query;
@@ -382,7 +557,7 @@ export class PostController {
     if (!communityid) {
       return res.status(400).json({
         success: false,
-        message: "Community ID is required"
+        message: "Community ID is required",
       });
     }
 
@@ -391,8 +566,8 @@ export class PostController {
       // First match posts from the specified community
       {
         $match: {
-          community: new mongoose.Types.ObjectId(communityid)
-        }
+          community: new mongoose.Types.ObjectId(communityid),
+        },
       },
       {
         $addFields: {
@@ -429,10 +604,10 @@ export class PostController {
     const totalCount = await Post.aggregate([
       {
         $match: {
-          community: new mongoose.Types.ObjectId(communityid)
-        }
+          community: new mongoose.Types.ObjectId(communityid),
+        },
       },
-      { $count: "total" }
+      { $count: "total" },
     ]);
 
     const total = totalCount.length > 0 ? totalCount[0].total : 0;
@@ -447,12 +622,10 @@ export class PostController {
         limit,
         totalPages,
         hasNextPage: page < totalPages,
-        hasPrevPage: page > 1
-      }
+        hasPrevPage: page > 1,
+      },
     });
   });
-
-
 
   // ✅ GET TRENDING POST WITH PAGINATION
   static GetTrendingPosts = AsyncHandler(async (req, res) => {
@@ -466,19 +639,19 @@ export class PostController {
           from: "communities",
           localField: "community",
           foreignField: "_id",
-          as: "communityDetails"
-        }
+          as: "communityDetails",
+        },
       },
       // 2. Unwind the joined array
       {
-        $unwind: "$communityDetails"
+        $unwind: "$communityDetails",
       },
       // 3. Filter public and free communities
       {
         $match: {
           "communityDetails.type": "Public",
-          "communityDetails.membershipType": "Free"
-        }
+          "communityDetails.membershipType": "Free",
+        },
       },
       // 4. Calculate age in hours
       {
@@ -515,18 +688,17 @@ export class PostController {
       {
         $project: {
           communityDetails: 0, // hide community details if not needed
-        }
-      }
+        },
+      },
     ]);
 
     res.status(200).json({
       success: true,
       page: parseInt(page),
       limit: parseInt(limit),
-      trendingPosts
+      trendingPosts,
     });
   });
-
 
   // ✅ GET PERSONALIZED TRENDING POSTS
   static GetPersonalizedTrendingPosts = AsyncHandler(async (req, res) => {
@@ -548,10 +720,12 @@ export class PostController {
     // Find communities where the user has active membership
     const userMemberships = await Membership.find({
       userId: userId,
-      status: 'active'
-    }).select('communityId');
+      status: "active",
+    }).select("communityId");
 
-    const userCommunityIds = userMemberships.map(membership => membership.communityId);
+    const userCommunityIds = userMemberships.map(
+      (membership) => membership.communityId
+    );
 
     // Find users with similar preferences - helps identify whose activity to prioritize
     const usersWithSimilarPreferences = await User.find({
@@ -569,12 +743,12 @@ export class PostController {
           from: "communities",
           localField: "community",
           foreignField: "_id",
-          as: "communityDetails"
-        }
+          as: "communityDetails",
+        },
       },
       // Stage 2: Unwind the community details array
       {
-        $unwind: "$communityDetails"
+        $unwind: "$communityDetails",
       },
       // Stage 3: Filter posts based on community access criteria
       {
@@ -583,14 +757,14 @@ export class PostController {
             // Public and free communities
             {
               "communityDetails.type": "Public",
-              "communityDetails.membershipType": "Free"
+              "communityDetails.membershipType": "Free",
             },
             // Communities where user has active membership
             {
-              "communityDetails._id": { $in: userCommunityIds }
-            }
-          ]
-        }
+              "communityDetails._id": { $in: userCommunityIds },
+            },
+          ],
+        },
       },
       // Stage 4: Calculate interest overlap between user and community - WITH NULL HANDLING
       {
@@ -600,19 +774,19 @@ export class PostController {
             $cond: {
               if: { $isArray: "$communityDetails.interests" },
               then: "$communityDetails.interests",
-              else: []
-            }
-          }
-        }
+              else: [],
+            },
+          },
+        },
       },
       {
         $addFields: {
           interestOverlap: {
             $size: {
-              $setIntersection: ["$communityInterests", userPreferences]
-            }
-          }
-        }
+              $setIntersection: ["$communityInterests", userPreferences],
+            },
+          },
+        },
       },
       // Stage 5: Look up engagement data
       {
@@ -621,7 +795,7 @@ export class PostController {
           localField: "_id",
           foreignField: "postId",
           as: "likes",
-        }
+        },
       },
       {
         $lookup: {
@@ -629,7 +803,7 @@ export class PostController {
           localField: "_id",
           foreignField: "postId",
           as: "comments",
-        }
+        },
       },
       {
         $lookup: {
@@ -637,7 +811,7 @@ export class PostController {
           localField: "_id",
           foreignField: "postId",
           as: "shares",
-        }
+        },
       },
       // Stage 6: Add fields for calculations - WITH NULL HANDLING
       {
@@ -646,8 +820,8 @@ export class PostController {
           likesArr: { $ifNull: ["$likes", []] },
           commentsArr: { $ifNull: ["$comments", []] },
           sharesArr: { $ifNull: ["$shares", []] },
-          viewsCount: { $ifNull: ["$viewsCount", 0] }
-        }
+          viewsCount: { $ifNull: ["$viewsCount", 0] },
+        },
       },
       {
         $addFields: {
@@ -660,8 +834,8 @@ export class PostController {
                     input: "$likesArr",
                     as: "like",
                     cond: { $in: ["$$like.userId", similarUserIds] },
-                  }
-                }
+                  },
+                },
               },
               {
                 $size: {
@@ -669,8 +843,8 @@ export class PostController {
                     input: "$commentsArr",
                     as: "comment",
                     cond: { $in: ["$$comment.userId", similarUserIds] },
-                  }
-                }
+                  },
+                },
               },
               {
                 $size: {
@@ -678,10 +852,10 @@ export class PostController {
                     input: "$sharesArr",
                     as: "share",
                     cond: { $in: ["$$share.userId", similarUserIds] },
-                  }
-                }
-              }
-            ]
+                  },
+                },
+              },
+            ],
           },
           // Standard engagement metrics
           likeCount: { $size: "$likesArr" },
@@ -689,13 +863,13 @@ export class PostController {
           shareCount: { $size: "$sharesArr" },
           // Calculate age in hours (for time decay)
           ageInHours: {
-            $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000]
+            $divide: [{ $subtract: ["$$NOW", "$createdAt"] }, 3600000],
           },
           // Extract community name and other fields
           communityName: "$communityDetails.communityName",
           communityType: "$communityDetails.type",
-          communityMembershipType: "$communityDetails.membershipType"
-        }
+          communityMembershipType: "$communityDetails.membershipType",
+        },
       },
       // Stage 7: Calculate trending score with all factors
       {
@@ -713,15 +887,15 @@ export class PostController {
                   // Similar user engagement boost
                   { $multiply: ["$similarUserEngagement", 5] },
                   // Interest overlap boost (x3 per matching interest)
-                  { $multiply: ["$interestOverlap", 3] }
-                ]
+                  { $multiply: ["$interestOverlap", 3] },
+                ],
               },
               {
-                $add: [1, "$ageInHours"] // Prevent division by zero and create time decay
-              }
-            ]
-          }
-        }
+                $add: [1, "$ageInHours"], // Prevent division by zero and create time decay
+              },
+            ],
+          },
+        },
       },
       // Stage 8: Sort by trending score
       { $sort: { trendingScore: -1 } },
@@ -746,9 +920,9 @@ export class PostController {
           interestOverlap: 1,
           communityName: 1,
           communityType: 1,
-          communityMembershipType: 1
-        }
-      }
+          communityMembershipType: 1,
+        },
+      },
     ]);
 
     // Get total count for pagination info
@@ -759,12 +933,12 @@ export class PostController {
           from: "communities",
           localField: "community",
           foreignField: "_id",
-          as: "communityDetails"
-        }
+          as: "communityDetails",
+        },
       },
       // Unwind the community details array
       {
-        $unwind: "$communityDetails"
+        $unwind: "$communityDetails",
       },
       // Filter based on community access criteria
       {
@@ -773,22 +947,23 @@ export class PostController {
             // Public and free communities
             {
               "communityDetails.type": "Public",
-              "communityDetails.membershipType": "Free"
+              "communityDetails.membershipType": "Free",
             },
             // Communities where user has active membership
             {
-              "communityDetails._id": { $in: userCommunityIds }
-            }
-          ]
-        }
+              "communityDetails._id": { $in: userCommunityIds },
+            },
+          ],
+        },
       },
       // Count the documents
       {
-        $count: "total"
-      }
+        $count: "total",
+      },
     ]);
 
-    const totalPosts = totalPostsQuery.length > 0 ? totalPostsQuery[0].total : 0;
+    const totalPosts =
+      totalPostsQuery.length > 0 ? totalPostsQuery[0].total : 0;
 
     res.status(200).json({
       success: true,
@@ -799,7 +974,7 @@ export class PostController {
         totalPosts,
         hasNextPage: page * limit < totalPosts,
         hasPrevPage: page > 1,
-      }
+      },
     });
   });
   // ✅ CREATE POLLS
@@ -822,7 +997,7 @@ export class PostController {
     session.startTransaction();
 
     const newPost = await Post.create(
-      [{ community: communityId, content: title, postType: "poll" }],
+      [{ community: communityId, contentText: title, postType: "poll" }],
       { session }
     );
     const newPoll = await Poll.create(

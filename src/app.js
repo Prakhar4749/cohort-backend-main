@@ -29,8 +29,12 @@ app.use(
 
 // Place CORS middleware before other middleware
 
-// ✅ Allow all origins temporarily
-app.use(cors());
+app.use(
+  cors({
+    origin: "*",
+    exposedHeaders: ["Authorization"], // <-- Important!
+  })
+);
 
 /*
 // 🔒 Previous restricted CORS setup — commented out for now

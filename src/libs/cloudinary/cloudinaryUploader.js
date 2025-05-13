@@ -1,53 +1,47 @@
 import { v2 as cloudinary } from "cloudinary";
-import { promises as fs } from "fs";
+import streamifier from "streamifier";
 import { appEnvConfigs } from "../../configs/env_config.js";
 
-// Initialize Cloudinary
+// Cloudinary config
 cloudinary.config({
   cloud_name: appEnvConfigs.CLOUDINARY_CLOUD_NAME,
   api_key: appEnvConfigs.CLOUDINARY_API_KEY,
   api_secret: appEnvConfigs.CLOUDINARY_API_SECRET,
-  secure: true
+  secure: true,
 });
 
-export const GetImageUrlFromCloudinary = async (imagePaths) => {
-  console.log("Cloudinary config:", {
-    cloud_name: appEnvConfigs.CLOUDINARY_CLOUD_NAME,
-    api_key: appEnvConfigs.CLOUDINARY_API_KEY.substring(0, 5) + "..." // Only log part of the key for security
-  });
-  if (!imagePaths || (Array.isArray(imagePaths) && imagePaths.length === 0)) {
-    console.error("File path is missing");
-    return null;
+/**
+ * Uploads buffer files to Cloudinary using streams.
+ * @param {Array} files - Multer files from memory storage
+ * @param {string} folderName - Optional Cloudinary folder name
+ * @returns {Promise<Array<string>>} - Array of Cloudinary URLs
+ */
+export const GetImageUrlFromCloudinary = async (files, folderName = "") => {
+  if (!files || files.length === 0) {
+    console.error("No files provided");
+    return [];
   }
-  const paths = Array.isArray(imagePaths) ? imagePaths : [imagePaths];
 
-  try {
-    const uploadPromises = paths.map(async (imagePath) => {
-      try {
-        await fs.access(imagePath);
+  const uploadPromises = files.map((file) => {
+    return new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          resource_type: "image",
+          folder: folderName || undefined, // Use folder only if provided
+        },
+        (error, result) => {
+          if (error) {
+            console.error("Upload error:", error);
+            reject(error);
+          } else {
+            resolve(result.secure_url);
+          }
+        }
+      );
 
-        const uploadResponse = await cloudinary.uploader.upload(imagePath, {
-          resource_type: "auto",
-        });
-
-        await fs
-          .unlink(imagePath)
-          .catch((err) => console.warn("Failed to delete local file:", err));
-
-        return uploadResponse.url;
-      } catch (error) {
-        console.error("Cloudinary upload failed for:", imagePath, error);
-        await fs.unlink(imagePath).catch(() => null); // Cleanup even on failure
-        return null;
-      }
+      streamifier.createReadStream(file.buffer).pipe(stream);
     });
+  });
 
-    const uploadedUrls = await Promise.all(uploadPromises);
-    return uploadedUrls.length === 1
-      ? uploadedUrls[0]
-      : uploadedUrls.filter((url) => url !== null);
-  } catch (error) {
-    console.log("🚀 ~ GetImageUrlFromCloudinary ~ error:", error);
-    return null;
-  }
+  return await Promise.all(uploadPromises);
 };

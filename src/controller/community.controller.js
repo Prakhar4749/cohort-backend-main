@@ -1,4 +1,9 @@
-import { ApiError, ApiResponse, AsyncHandler } from "../utils/responseUtils.js";
+import {
+  ApiError,
+  ApiResponse,
+  AsyncHandler,
+  successResponse,
+} from "../utils/responseUtils.js";
 import { GetImageUrlFromCloudinary } from "../libs/cloudinary/cloudinaryUploader.js";
 import Community from "../models/community/community.model.js";
 import User from "../models/users/user.model.js";
@@ -11,31 +16,28 @@ import { communityTransaction } from "../models/community/comunity.transaction.m
 
 export class CommunityController {
   // �� Private method to find a community by ID
-
   static #handleFileUploads = async (files) => {
     const updateData = {};
 
     try {
       // Handle profile photo upload (single file)
-      if (
-        files?.communityProfileImage &&
-        files.communityProfileImage.length > 0
-      ) {
-        updateData.profilePhoto = await GetImageUrlFromCloudinary([
-          files.communityProfileImage[0].path,
-        ]);
+      if (files?.communityProfileImage?.length > 0) {
+        const result = await GetImageUrlFromCloudinary(
+          [files.communityProfileImage[0]],
+          "community/profileImages"
+        );
+        updateData.profilePhoto = Array.isArray(result) ? result[0] : result;
       }
 
       // Handle cover photos upload (multiple files)
-      if (
-        files?.communityCoverImages &&
-        files.communityCoverImages.length > 0
-      ) {
-        const coverPhotoPaths = files.communityCoverImages.map(
-          (file) => file.path
+      if (files?.communityCoverImages?.length > 0) {
+        const result = await GetImageUrlFromCloudinary(
+          files.communityCoverImages,
+          "community/coverImages"
         );
-        updateData.coverPhoto =
-          await GetImageUrlFromCloudinary(coverPhotoPaths);
+        updateData.coverPhoto = Array.isArray(result) ? result : [result];
+      } else {
+        updateData.coverPhoto = []; // Ensure it's always an array
       }
 
       console.log("File upload update data:", updateData);
@@ -186,7 +188,7 @@ export class CommunityController {
         communityType: communityType.toLowerCase(),
         membershipType: membershipType.toLowerCase(),
         interests: formattedInterests,
-        owner: req.user._id,
+        owner: req.user.id,
         media: {
           profileImage: uploadedFiles.profilePhoto || "",
           coverImages: uploadedFiles.coverPhoto || [],
@@ -231,7 +233,7 @@ export class CommunityController {
 
       // Create community permissions (within the transaction)
       const permissionsData = {
-        community: community._id,
+        community: community.id,
         member: {
           canPost: parsedCanPost, // From UI toggle
           canChat: parsedCanChat, // From UI toggle
@@ -249,32 +251,36 @@ export class CommunityController {
       };
 
       // Create permissions document (within the transaction)
-      const permissionsArray = await CommunityPermissions.create([permissionsData], { session });
+      const permissionsArray = await CommunityPermissions.create(
+        [permissionsData],
+        { session }
+      );
       const permissions = permissionsArray[0];
 
       // Link permissions to community (within the transaction)
       await Community.findByIdAndUpdate(
-        community._id,
-        { permissions: permissions._id },
+        community.id,
+        { permissions: permissions.id },
         { session }
       );
 
+      console.log("User ID:", req.user.id);
+      console.log("Community ID:", community.id);
+      console.log("Permissions ID:", permissions.id);
+
       // Create admin membership for the creator (within the transaction)
-      await Membership.create(
-        [
-          {
-            userId: req.user._id,
-            communityId: community._id,
-            role: "admin",
-            status: "active",
-            joinedAt: new Date(),
-            activityStats: {
-              lastActive: new Date(),
-            },
-            // Add a note that this is the founding member
-            adminNotes: "Founding member and creator of the community",
+      await Membership.createMembership(
+        {
+          userId: req.user.id,
+          communityId: community.id,
+          role: "admin",
+          status: "active",
+          joinedAt: new Date(),
+          activityStats: {
+            lastActive: new Date(),
           },
-        ],
+        },
+
         { session }
       );
 
@@ -282,11 +288,12 @@ export class CommunityController {
       await session.commitTransaction();
 
       // Return success response
-      return new ApiResponse(
-        201,
+      return successResponse(
+        res,
+        community.toJSON(),
         "Community created successfully",
-        community
-      ).send(res);
+        201
+      );
     } catch (error) {
       // If anything fails, abort the transaction
       await session.abortTransaction();
@@ -381,45 +388,112 @@ export class CommunityController {
 
   static JoinCommunity = AsyncHandler(async (req, res) => {
     const communityId = req.params.communityId;
-
     const userId = req.user._id;
 
     // Check if community exists
     const community = await Community.findById(communityId);
     if (!community) {
-      throw new Error("Community not found");
+      throw new ApiError(404, "Community not found");
     }
 
     // Check if already a member
-    const existingMembership = await Membership.findOne({
+    const existingMembership = await Membership.findMembership(
       userId,
-      communityId,
-    });
-
+      communityId
+    );
     if (existingMembership) {
-      throw new Error("Already a member of this community");
+      throw new ApiError(409, "Already a member of this community");
     }
 
-    // Create membership
-    const membership = await Membership.create({
+    // Determine membership type based on community type
+    const membershipType = community.membershipType;
+
+    // Prepare full membership data in one go
+    const now = new Date();
+    const membershipData = {
       userId,
       communityId,
       role: "member",
       status: "active",
-      subscriptionStatus:
-        community.membershipType === "Free" ? "free" : "pending",
-    });
+      membershipType,
+      joinedAt: now,
+      activityStats: { lastActive: now },
+    };
 
-    res
-      .status(200)
-      .json(
-        new ApiResponse(
-          200,
-          "User joined the community successfully",
-          membership
-        )
-      );
+    // Add subscription data directly if paid
+    if (membershipType === "paid") {
+      membershipData.subscriptionStatus = "free"; // Free until payment
+      membershipData.subscription = {
+        startDate: now,
+        plan: "basic",
+        autoRenew: false,
+      };
+    }
+
+    // Create appropriate membership based on type using the factory method
+    let membership;
+    try {
+      membership = await Membership.createMembership(membershipData, community);
+    } catch (error) {
+      console.error("Error creating membership:", error);
+      throw new ApiError(500, "Failed to create membership");
+    }
+
+    // Return success response with the created membership
+    return successResponse(
+      res,
+      membership,
+      "User joined the community successfully",
+      201 // Changed to 201 Created for resource creation
+    );
   });
+
+  // static JoinCommunity = AsyncHandler(async (req, res) => {
+  //   const communityId = req.params.communityId;
+
+  //   const userId = req.user._id;
+
+  //   // Check if community exists
+  //   const community = await Community.findById(communityId);
+  //   if (!community) {
+  //     throw new ApiError(404, "Community not found");
+  //   }
+
+  //   // Check if already a member
+  //   const existingMembership = await Membership.findOne({
+  //     userId,
+  //     communityId,
+  //   });
+
+  //   if (existingMembership) {
+  //     throw new ApiError(409, "Already a member of this community");
+  //   }
+
+  //   // Create membership
+  //   const membership = await Membership.create({
+  //     userId: userId,
+  //     communityId: communityId,
+  //     role: "member",
+
+  //     status: "active",
+  //     joinedAt: new Date(),
+  //     activityStats: {
+  //       lastActive: new Date(),
+  //     },
+  //     subscriptionStatus:
+  //       community.membershipType === "Free" ? "free" : "pending",
+  //   });
+
+  //   res
+  //     .status(200)
+  //     .json(
+  //       new ApiResponse(
+  //         200,
+  //         "User joined the community successfully",
+  //         membership
+  //       )
+  //     );
+  // });
 
   // get all community of user as admin with pagination
   static getCommunitiesAsAdmin = AsyncHandler(async (req, res) => {

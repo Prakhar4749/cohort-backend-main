@@ -10,7 +10,7 @@ const CommunityRouter = Router();
 CommunityRouter.use(authMiddleware);
 
 // CREATE COMMUNITY
-CommunityRouter.route("/communities/create").post((req, res, next) => {
+CommunityRouter.route("/community/create").post((req, res, next) => {
   if (req.is("multipart/form-data")) {
     upload.fields([
       { name: "communityProfileImage", maxCount: 1 },
@@ -113,7 +113,7 @@ CommunityRouter.route("/communities/create").post((req, res, next) => {
 }, CommunityController.CreateCommunity);
 
 // JOIN COMMUNITY
-CommunityRouter.route("/communities/:communityId/join").post(
+CommunityRouter.route("/community/:communityId/join").post(
   CommunityController.JoinCommunity
 );
 
@@ -123,7 +123,7 @@ CommunityRouter.route("/communities/admin").get(
 );
 
 // get specific COMMUNITY details as admin
-CommunityRouter.route("/communities/admin/:communityId").get(
+CommunityRouter.route("/community/admin/:communityId").get(
   CommunityController.getSpecificCommunityAsAdmin
 );
 
@@ -133,65 +133,62 @@ CommunityRouter.route("/communities/suggestion").get(
 );
 
 // update specific COMMUNITY details as admin
-CommunityRouter.route("/communities/admin/:communityId").put(
-  (req, res, next) => {
-    // Only apply multer middleware for multipart/form-data requests
-    if (req.is("multipart/form-data")) {
-      upload.fields([
-        { name: "communityProfileImage", maxCount: 1 },
-        { name: "communityCoverImages", maxCount: 10 },
-      ])(req, res, (err) => {
-        if (err) {
-          return next(err);
-        }
-        next();
-      });
-    } else {
-      // If not multipart, just proceed to the controller
+CommunityRouter.route("/community/admin/:communityId").put((req, res, next) => {
+  // Only apply multer middleware for multipart/form-data requests
+  if (req.is("multipart/form-data")) {
+    upload.fields([
+      { name: "communityProfileImage", maxCount: 1 },
+      { name: "communityCoverImages", maxCount: 10 },
+    ])(req, res, (err) => {
+      if (err) {
+        return next(err);
+      }
       next();
-    }
-  },
-  CommunityController.updateSpecificCommunityAsAdmin
-);
+    });
+  } else {
+    // If not multipart, just proceed to the controller
+    next();
+  }
+}, CommunityController.updateSpecificCommunityAsAdmin);
 
 // delete COMMUNITY as owner
-CommunityRouter.route("/communities/admin/:communityId").delete(
+CommunityRouter.route("/community/admin/:communityId").delete(
   CommunityController.deleteCommunityAsOwner
 );
 
 // Payment routes
 
-CommunityRouter.route("/communities/paymentMethod/:communityId").get(
+CommunityRouter.route("/community/paymentMethod/:communityId").get(
   CommunityController.getCommunityPaymentMethod
 );
 
-CommunityRouter.route("/communities/paymentMethod/:communityId").post(
+CommunityRouter.route("/community/paymentMethod/:communityId").post(
   CommunityController.addCommunityPaymentMethod
 );
 
 CommunityRouter.route(
-  "/communities/paymentMethod/:communityId/update/:payment_method_id"
+  "/community/paymentMethod/:communityId/update/:payment_method_id"
 ).put(CommunityController.updateCommunityPaymentMethod);
 
 CommunityRouter.route(
-  "/communities/paymentMethod/:communityId/delete/:payment_method_id"
+  "/community/paymentMethod/:communityId/delete/:payment_method_id"
 ).delete(CommunityController.deleteCommunityPaymentMethod);
 
 // transaction
-CommunityRouter.route("/communities/transaction/:communityId").get(
+CommunityRouter.route("/community/transaction/:communityId").get(
   CommunityController.getCommunityTransaction
 );
 // permissions
-CommunityRouter.route("/communities/permission/:communityId").get(
+CommunityRouter.route("/community/permission/:communityId").get(
   CommunityController.getCommunityPermissions
 );
 
-CommunityRouter.route("/communities/permission/:communityId").put(
+CommunityRouter.route("/community/permission/:communityId").put(
   CommunityController.updateCommunityPermissions
 );
 
 // COMMUNITY STATS
-CommunityRouter.route("/communities/:communityid/stats").get(
+CommunityRouter.route("/community/:communityid/stats").get(
   CommunityController.GetCommunityStats
 );
 
